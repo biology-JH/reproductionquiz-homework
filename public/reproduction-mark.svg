@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" role="img" aria-label="Reproduction Mastery botanical mark">
+  <rect width="96" height="96" rx="28" fill="#214E34"/>
+  <path d="M48 70c-1-17-13-28-26-31 2 17 11 28 26 31Zm0 0c1-18 11-31 27-36-1 20-11 33-27 36Z" fill="#F5F2E8" stroke="#D6A84B" stroke-width="2.5" stroke-linejoin="round"/>
+  <path d="M48 72V37m0 17L34 46m14 13 17-14" fill="none" stroke="#D6A84B" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="48" cy="26" r="5" fill="#D6A84B"/>
+  <path d="M47 31c-6 3-8 9-7 16m9-16c6 4 8 9 7 16" fill="none" stroke="#F5F2E8" stroke-width="2" stroke-linecap="round"/>
+</svg>
