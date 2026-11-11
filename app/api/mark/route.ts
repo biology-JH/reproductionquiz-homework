@@ -47,6 +47,7 @@ function decryptMasterQuestions(password: string): MasterQuestion[] {
     "sha256",
   );
   const decipher = createDecipheriv("aes-256-gcm", key, Buffer.from(encryptedMasterKey.nonce, "base64"));
+  decipher.setAAD(Buffer.from("igcse0610-ch16-master-key-v1", "utf8"));
   decipher.setAuthTag(tag);
   const raw = Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString("utf8");
   const master = JSON.parse(raw) as { questions?: MasterQuestion[] };
@@ -132,12 +133,16 @@ export async function POST(request: Request) {
   const expectedPassword = process.env.MARKING_PASSWORD;
   if (!expectedPassword) return privateJson({ ok: false, message: "Marking is not configured yet." }, 503);
 
-  let payload: { markingPassword?: unknown; answers?: unknown };
+  let body: unknown;
   try {
-    payload = await request.json();
+    body = await request.json();
   } catch {
     return privateJson({ ok: false, message: "Submit the answers and Marking Password to continue." }, 400);
   }
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return privateJson({ ok: false, message: "The marking request must be a JSON object." }, 400);
+  }
+  const payload = body as { markingPassword?: unknown; answers?: unknown };
 
   const supplied = typeof payload.markingPassword === "string" ? payload.markingPassword : "";
   if (supplied.length > 256 || !matchesSecret(supplied, expectedPassword)) {

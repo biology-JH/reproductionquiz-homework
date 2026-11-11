@@ -24,12 +24,16 @@ export async function POST(request: Request) {
   const expected = process.env.HOMEWORK_PASSWORD;
   if (!expected) return privateJson({ ok: false, message: "Homework access is not configured yet." }, 503);
 
-  let payload: { homeworkPassword?: unknown };
+  let body: unknown;
   try {
-    payload = await request.json();
+    body = await request.json();
   } catch {
     return privateJson({ ok: false, message: "Enter the Homework Password to continue." }, 400);
   }
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return privateJson({ ok: false, message: "The homework request must be a JSON object." }, 400);
+  }
+  const payload = body as { homeworkPassword?: unknown };
 
   const supplied = typeof payload.homeworkPassword === "string" ? payload.homeworkPassword : "";
   if (supplied.length > 256 || !matchesSecret(supplied, expected)) {
