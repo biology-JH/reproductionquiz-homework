@@ -13,8 +13,7 @@ export interface PublicQuestion {
 }
 
 export interface ExamVisual {
-  src: string;
-  alt: string;
+  images: Array<{ src: string; alt: string; caption: string }>;
 }
 
 export interface ExamPayload {

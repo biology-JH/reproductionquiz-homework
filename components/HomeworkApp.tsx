@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import QuestionCard from "@/components/QuestionCard";
 import ReportDownload from "@/components/ReportDownload";
+import FigureGallery from "@/components/FigureGallery";
 import type { ExamPayload, MarkResult, PublicQuestion, Tier } from "@/lib/types";
 
 interface QuestionGroup {
@@ -47,8 +48,9 @@ export default function HomeworkApp() {
   const [markError, setMarkError] = useState("");
   const [unlocking, setUnlocking] = useState(false);
   const [marking, setMarking] = useState(false);
-  const [progressStatus, setProgressStatus] = useState("Your answers save locally on this device as you work.");
+  const [progressStatus, setProgressStatus] = useState("Your typed answers and sketch save locally on this device as you work.");
   const skipNextAutosave = useRef(false);
+  const [progressResetSignal, setProgressResetSignal] = useState(0);
 
   const coreQuestions = useMemo(() => exam?.questions.filter((question) => question.section === "Core") ?? [], [exam]);
   const extendedQuestions = useMemo(() => exam?.questions.filter((question) => question.section === "Extended") ?? [], [exam]);
@@ -95,7 +97,9 @@ export default function HomeworkApp() {
       if (!response.ok) throw new Error(data.message || "The exam could not be opened.");
       const nextExam = data as ExamPayload;
       let restoredAnswers: Record<string, string> = {};
+      let savedDrawing = false;
       try {
+        savedDrawing = Boolean(window.localStorage.getItem(`${progressKeyFor(studentName)}:drawing:C02u`));
         const saved = window.localStorage.getItem(progressKeyFor(studentName));
         if (saved) {
           const parsed = JSON.parse(saved) as { version?: number; answers?: unknown };
@@ -112,7 +116,7 @@ export default function HomeworkApp() {
         setProgressStatus("Saved progress could not be read; a fresh attempt is ready.");
       }
       setAnswers(restoredAnswers);
-      setProgressStatus(Object.values(restoredAnswers).some((answer) => answer.trim())
+      setProgressStatus(Object.values(restoredAnswers).some((answer) => answer.trim()) || savedDrawing
         ? "Previous progress restored from this device."
         : "Autosave is ready. Passwords are never saved.");
       setExam(nextExam);
@@ -136,12 +140,14 @@ export default function HomeworkApp() {
     if (!window.confirm("Clear this student's saved answers and restart the exam? This cannot be undone. Passwords are not saved.")) return;
     try {
       window.localStorage.removeItem(progressKeyFor(studentName));
+      window.localStorage.removeItem(`${progressKeyFor(studentName)}:drawing:C02u`);
       skipNextAutosave.current = true;
       setAnswers({});
+      setProgressResetSignal((value) => value + 1);
       setResult(null);
       setMarkingPassword("");
       setMarkError("");
-      setProgressStatus("Saved answers cleared. New answers will save locally as you work.");
+      setProgressStatus("Saved answers and sketch cleared. New work will save locally as you continue.");
     } catch {
       setProgressStatus("The browser could not clear LocalStorage. You can remove this site's data in browser settings.");
     }
@@ -189,8 +195,8 @@ export default function HomeworkApp() {
               A rigorous Chapter 16 practice paper built from your class slides: reproduction in plants and humans, hormonal control, STIs and practical reasoning.
             </p>
             <div className="welcome-facts">
-              <div><strong>132</strong><span>questions</span></div>
-              <div><strong>156</strong><span>available marks</span></div>
+              <div><strong>138</strong><span>questions</span></div>
+              <div><strong>182</strong><span>available marks</span></div>
               <div><strong>Core → Extended</strong><span>in that order</span></div>
             </div>
             <p className="welcome-note">Original teacher-created practice. Paper styles are modelled on the syllabus, not copied from Cambridge papers.</p>
@@ -264,17 +270,12 @@ export default function HomeworkApp() {
                 <div><h3>{group.title}</h3><p>{group.id} · {group.questions.length} question parts</p></div>
                 <span className="group-paper">{group.questions[0]?.paper}</span>
               </header>
-              {visual && (
-                <figure className="exam-figure">
-                  <img src={visual.src} alt={visual.alt} />
-                  <figcaption>{visual.alt} Refer to labels where the question directs you to do so.</figcaption>
-                </figure>
-              )}
               <div className="question-list">
                 {group.questions.map((question) => (
-                  <QuestionCard key={question.id} question={question} answer={answers[question.id] || ""} onChange={changeAnswer} />
+                  <QuestionCard key={question.id} question={question} answer={answers[question.id] || ""} onChange={changeAnswer} visual={exam.visuals[question.id]} progressStorageKey={progressKeyFor(studentName)} drawingResetSignal={progressResetSignal} />
                 ))}
               </div>
+              {visual && <FigureGallery visual={visual} />}
             </div>
           );
         })}

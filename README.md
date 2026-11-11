@@ -12,24 +12,20 @@ cp .env.example .env.local
 pnpm dev
 ```
 
-For local testing, set `HOMEWORK_PASSWORD`, `MARKING_PASSWORD` and `MARKING_KEY_GZIP_B64` in `.env.local`. Never commit `.env.local` or share its values. The compressed key is generated from the teacher-only master key package; it must remain server-side.
+Set `HOMEWORK_PASSWORD` and `MARKING_PASSWORD` in `.env.local` for local testing. Never commit `.env.local` or share its values. The answer key in `server/master_key.ts` is ciphertext, imported only by the server marking route and decrypted only after the marking gate accepts the password.
 
-## Vercel setup
+## Production deployment
 
-Deploy the private GitHub repository as a Next.js project. Add these as **sensitive server-side environment variables** for Production and Preview:
+Deploy the private GitHub repository as a Next.js project. Configure `HOMEWORK_PASSWORD` and `MARKING_PASSWORD` as sensitive server-side environment values for the target deployment environment. Do not add a `NEXT_PUBLIC_` prefix, and do not use development/test values in production.
 
-- `HOMEWORK_PASSWORD` — exact password for the exam-access gate.
-- `MARKING_PASSWORD` — separate exact password for the marking gate.
-- `MARKING_KEY_GZIP_B64` — base64-encoded gzip archive of the master question/answer data.
-
-Do not add a `NEXT_PUBLIC_` prefix. The UI receives only question text and diagrams after the first server-side gate; the answer key is loaded only inside the Node marking route after the second password is accepted. API responses use `Cache-Control: private, no-store`. Student answers are not written to a database or file.
+The UI receives question text and diagrams only after the first server-side gate. The answer-key ciphertext remains outside the client bundle; only the Node marking route can decrypt it after validating the second password. API responses use `Cache-Control: private, no-store`. Typed answers and the flower sketch are saved only in browser LocalStorage; they are not written to a database or server file, and the sketch is never sent to the grading endpoint.
 
 ## Assessment notes
 
-Question text and visuals are served by a server API after homework-password validation. Accepted answers and rubrics are held in a Vercel environment variable and never shipped in a browser bundle. The auto-marker uses deterministic accepted-answer and keyword rules; teachers should review unusual valid wording. The flower drawing pad is local-only and never uploaded; its instant mark checks typed labels, not sketch quality or placement.
+The auto-marker uses deterministic accepted-answer and keyword rules. Teachers should review unusual valid wording. The flower drawing pad is local-only and never uploaded; the instant mark checks its six typed labels, not sketch quality or placement. All typed text in the print exam and student workbook is at least 24 pt; the website and marked-report PDF also enforce a minimum 24 px/pt respectively. Biology visuals are original image objects extracted from the uploaded PowerPoint decks, not generated replacement diagrams; the printable exam captions identify their source deck and slide.
 
 The grade band shown is an informal chapter-practice indicator, not an official Cambridge grade boundary or final-grade prediction. Corrections are teacher-created practice guidance, not Cambridge's official mark-scheme text. This app is not affiliated with or endorsed by Cambridge International.
 
 ## Student progress storage
 
-After a student passes Gate 1, answer inputs are written to browser LocalStorage as they change, under a key separated by the entered student name. On a later visit, the app restores that student's saved answers after Gate 1 is accepted again. “Clear My Progress” removes the current student's saved answers. Neither password is included in this local record; students on shared devices should clear progress when finished.
+After a student passes Gate 1, typed answers and the flower sketch are written to browser LocalStorage as they change, under keys separated by the entered student name. On a later visit, the app restores that student's saved answers and sketch after Gate 1 is accepted again. “Clear My Progress” removes both for the current student. Neither password is included in LocalStorage; the sketch is never uploaded or sent for marking. Students on shared devices should clear progress when finished.

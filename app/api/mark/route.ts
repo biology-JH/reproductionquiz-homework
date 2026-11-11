@@ -1,9 +1,9 @@
 import "server-only";
 
-import { createHash, timingSafeEqual } from "node:crypto";
-import { gunzipSync } from "node:zlib";
+import { createDecipheriv, createHash, pbkdf2Sync, timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { examQuestions } from "@/server/exam-content";
+import { encryptedMasterKey } from "@/server/master_key";
 import type { Tier } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -32,6 +32,26 @@ function matchesSecret(input: string, expected: string): boolean {
   const inputDigest = createHash("sha256").update(input, "utf8").digest();
   const expectedDigest = createHash("sha256").update(expected, "utf8").digest();
   return timingSafeEqual(inputDigest, expectedDigest);
+}
+
+function decryptMasterQuestions(password: string): MasterQuestion[] {
+  const ciphertextAndTag = Buffer.from(encryptedMasterKey.ciphertext, "base64");
+  if (ciphertextAndTag.length < 17) throw new Error("Invalid encrypted key.");
+  const ciphertext = ciphertextAndTag.subarray(0, -16);
+  const tag = ciphertextAndTag.subarray(-16);
+  const key = pbkdf2Sync(
+    password,
+    Buffer.from(encryptedMasterKey.salt, "base64"),
+    encryptedMasterKey.iterations,
+    32,
+    "sha256",
+  );
+  const decipher = createDecipheriv("aes-256-gcm", key, Buffer.from(encryptedMasterKey.nonce, "base64"));
+  decipher.setAuthTag(tag);
+  const raw = Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString("utf8");
+  const master = JSON.parse(raw) as { questions?: MasterQuestion[] };
+  if (!Array.isArray(master.questions)) throw new Error("Invalid answer key.");
+  return master.questions;
 }
 
 function normalize(value: unknown): string {
@@ -124,15 +144,9 @@ export async function POST(request: Request) {
     return privateJson({ ok: false, message: "That Marking Password was not accepted. No score or corrections were released." }, 401);
   }
 
-  const packedKey = process.env.MARKING_KEY_GZIP_B64;
-  if (!packedKey) return privateJson({ ok: false, message: "The protected answer key is not configured." }, 503);
-
   let masterQuestions: MasterQuestion[];
   try {
-    const decoded = gunzipSync(Buffer.from(packedKey, "base64")).toString("utf8");
-    const master = JSON.parse(decoded) as { questions?: MasterQuestion[] };
-    if (!Array.isArray(master.questions)) throw new Error("Invalid answer key.");
-    masterQuestions = master.questions;
+    masterQuestions = decryptMasterQuestions(expectedPassword);
   } catch {
     return privateJson({ ok: false, message: "The protected answer key could not be loaded." }, 503);
   }

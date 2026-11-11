@@ -1,10 +1,78 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
-export default function DrawingPad() {
+interface Props {
+  storageKey: string;
+  resetSignal: number;
+}
+
+export default function DrawingPad({ storageKey, resetSignal }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const saveTimer = useRef<number | null>(null);
   const [drawing, setDrawing] = useState(false);
+  const [storageWarning, setStorageWarning] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    try {
+      const savedImage = window.localStorage.getItem(storageKey);
+      if (savedImage) {
+        const image = new window.Image();
+        image.onload = () => {
+          if (!active) return;
+          const context = canvas.getContext("2d");
+          if (context) context.drawImage(image, 0, 0, canvas.width, canvas.height);
+        };
+        image.onerror = () => setStorageWarning(true);
+        image.src = savedImage;
+      }
+    } catch {
+      setStorageWarning(true);
+    }
+    return () => {
+      active = false;
+      if (saveTimer.current !== null) {
+        window.clearTimeout(saveTimer.current);
+        saveTimer.current = null;
+      }
+    };
+  }, [storageKey]);
+
+  useEffect(() => {
+    if (resetSignal === 0) return;
+    const canvas = canvasRef.current;
+    const context = canvas?.getContext("2d");
+    if (canvas && context) context.clearRect(0, 0, canvas.width, canvas.height);
+    setDrawing(false);
+    try {
+      window.localStorage.removeItem(storageKey);
+      setStorageWarning(false);
+    } catch {
+      setStorageWarning(true);
+    }
+  }, [resetSignal, storageKey]);
+
+  function saveNow() {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    try {
+      window.localStorage.setItem(storageKey, canvas.toDataURL("image/png"));
+      setStorageWarning(false);
+    } catch {
+      setStorageWarning(true);
+    }
+  }
+
+  function scheduleSave() {
+    if (saveTimer.current !== null) window.clearTimeout(saveTimer.current);
+    saveTimer.current = window.setTimeout(() => {
+      saveTimer.current = null;
+      saveNow();
+    }, 300);
+  }
 
   function point(event: React.PointerEvent<HTMLCanvasElement>) {
     const canvas = canvasRef.current;
@@ -39,10 +107,16 @@ export default function DrawingPad() {
     const p = point(event);
     context.lineTo(p.x, p.y);
     context.stroke();
+    scheduleSave();
   }
 
   function finish() {
     setDrawing(false);
+    if (saveTimer.current !== null) {
+      window.clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    saveNow();
   }
 
   function clear() {
@@ -51,12 +125,22 @@ export default function DrawingPad() {
     if (!canvas || !context) return;
     context.clearRect(0, 0, canvas.width, canvas.height);
     setDrawing(false);
+    if (saveTimer.current !== null) {
+      window.clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    try {
+      window.localStorage.removeItem(storageKey);
+      setStorageWarning(false);
+    } catch {
+      setStorageWarning(true);
+    }
   }
 
   return (
     <div className="drawing-pad">
       <div className="drawing-pad-head">
-        <span>Drawing area · stays in this browser</span>
+        <span>Drawing area · saved only in this browser</span>
         <button type="button" className="quiet-button" onClick={clear}>Clear drawing</button>
       </div>
       <canvas
@@ -70,7 +154,8 @@ export default function DrawingPad() {
         onPointerCancel={finish}
         onLostPointerCapture={finish}
       />
-      <p>Use a stylus, mouse or touch. The sketch is not uploaded or included in the report.</p>
+      <p>Use a stylus, mouse or touch. The sketch is never uploaded or sent for marking.</p>
+      {storageWarning && <p role="alert">This browser could not save or restore the sketch. Keep this page open to avoid losing it.</p>}
     </div>
   );
 }

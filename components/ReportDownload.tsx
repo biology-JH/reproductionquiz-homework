@@ -21,12 +21,12 @@ export default function ReportDownload({ studentName, result }: Props) {
       const left = 18;
       const right = 192;
       let y = 20;
-      const lineHeight = 5.1;
+      const lineHeight = 9.5;
 
       function write(text: string, options: { size?: number; bold?: boolean; gap?: number } = {}) {
         const { size = 10, bold = false, gap = 2.5 } = options;
         pdf.setFont("times", bold ? "bold" : "normal");
-        pdf.setFontSize(size);
+        pdf.setFontSize(Math.max(24, size));
         const lines = pdf.splitTextToSize(text, right - left);
         const height = lines.length * lineHeight;
         if (y + height > 276) {
