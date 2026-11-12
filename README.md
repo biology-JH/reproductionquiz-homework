@@ -26,6 +26,8 @@ Set the following **server-only** environment variables for the target runtime:
 - `MARKING_PASSWORD` — authorizes marking and is also the password-derived decryption key for the server-only AES-256-GCM answer-key ciphertext in `server/master_key.ts`.
 - `TRACK_SESSION_SECRET` — signs the short-lived, HttpOnly selected-track cookie.
 
+For Vercel, store all three as project **Secret** environment variables with the **Production** target. Updating a variable does not change an already-running deployment; create a fresh Production deployment after changing these values. The app fails closed when a required gate or signing secret is missing.
+
 Never put secret values in source files, documentation, client components, public assets or Git. The public `server/exam-content.ts` contains question text and figure metadata only. The encrypted answer key is imported only by `app/api/mark/route.ts`, which checks the Marking Password before decryption and uses no-store response headers. The classroom password gate is a shared-password convenience, not a replacement for individual student identity controls.
 
 ## Local development
