@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import QuestionCard from "@/components/QuestionCard";
 import ReportDownload from "@/components/ReportDownload";
+import Image from "next/image";
 import type { ExamPayload, MarkResult, PublicQuestion, Tier } from "@/lib/types";
 
 interface QuestionGroup {
@@ -208,6 +209,21 @@ export default function HomeworkApp() {
         </header>
         <div className="welcome-layout" id="top">
           <section className="welcome-story">
+            <figure className="welcome-visual">
+              <Image
+                className="welcome-art"
+                src="/hero/reproduction-front-page.png"
+                alt="A pink blossom releases pollen beside an open seed pod and seeds beginning to germinate in soil."
+                width={1072}
+                height={624}
+                sizes="(max-width: 820px) 100vw, 52vw"
+                priority
+              />
+              <figcaption>
+                <span>FIELD NOTE · 16.3</span>
+                <strong>From blossom to new growth</strong>
+              </figcaption>
+            </figure>
             <p className="eyebrow"><span className="eyebrow-rule" /> CAMBRIDGE IGCSE BIOLOGY 0610</p>
             <h1>Reproduction,<br /><em>under the microscope.</em></h1>
             <p className="welcome-copy">

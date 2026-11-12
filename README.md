@@ -1,6 +1,6 @@
 # Reproduction Mastery — IGCSE Biology 0610
 
-A large-print, two-track Chapter 16 reproduction practice application built from five teacher-supplied PowerPoint decks. The app uses original figures extracted from those slides and teacher-authored practice questions; it is not an official Cambridge International paper.
+A large-print, two-track Chapter 16 reproduction practice application built from five teacher-supplied PowerPoint decks. The welcome page and track-specific booklet covers feature the teacher-supplied blossom-to-seedling artwork from the attached assessment PDF; question figures remain original images extracted from the PowerPoint decks. The practice questions are teacher-authored and are not an official Cambridge International paper.
 
 ## Student experience
 

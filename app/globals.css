@@ -32,6 +32,12 @@ button:disabled { cursor: wait; opacity: .72; }
 .welcome-page { min-height: 100vh; display: flex; flex-direction: column; background: radial-gradient(ellipse at 78% 26%, rgba(214,168,75,.13), transparent 27%), linear-gradient(90deg, transparent 0 6%, rgba(33,78,52,.035) 6.05%, transparent 6.15%), var(--paper); }
 .welcome-layout { width: min(1120px, calc(100% - 48px)); margin: auto; padding: clamp(48px, 8vh, 92px) 0; display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(320px, .75fr); gap: clamp(50px, 9vw, 130px); align-items: center; }
 .welcome-story { max-width: 600px; }
+.welcome-visual { position: relative; margin: 0 0 27px; overflow: hidden; border: 1px solid rgba(33,78,52,.22); border-radius: 13px; background: #dceee8; box-shadow: 0 22px 48px rgba(24,58,39,.13); isolation: isolate; }
+.welcome-visual::after { position: absolute; z-index: 0; inset: 54% 0 0; background: linear-gradient(0deg, rgba(24,58,39,.88), rgba(24,58,39,0)); content: ""; pointer-events: none; }
+.welcome-visual .welcome-art { display: block; width: 100%; height: auto; }
+.welcome-visual figcaption { position: absolute; z-index: 1; right: 14px; bottom: 14px; left: 20px; display: flex; flex-direction: column; gap: 2px; color: #fffdf5; }
+.welcome-visual figcaption span { color: #f4d99a; font-size: max(24px, 10px); font-weight: 800; letter-spacing: .14em; }
+.welcome-visual figcaption strong { font-family: 'Source Serif 4', Georgia, serif; font-size: max(24px, 24px); font-weight: 600; line-height: 1.15; }
 .eyebrow { display: flex; align-items: center; gap: 10px; margin: 0 0 15px; color: var(--forest); font-size: max(24px, 10px); font-weight: 800; letter-spacing: .17em; }
 .eyebrow-rule { width: 24px; height: 2px; background: var(--gold); }
 h1, h2, h3 { font-family: 'Source Serif 4', Georgia, serif; font-weight: 500; letter-spacing: -.035em; }
@@ -160,6 +166,7 @@ h1, h2, h3 { font-family: 'Source Serif 4', Georgia, serif; font-weight: 500; le
   .topbar { padding-inline: 16px; min-height: 66px; }
   .topbar-note { display: none; }
   .welcome-layout { width: calc(100% - 32px); padding: 42px 0; }
+  .welcome-visual figcaption { right: 10px; bottom: 10px; left: 13px; }
   .welcome-facts { gap: 17px; }
   .welcome-facts strong { font-size: max(24px, 19px); }
   .site-footer { flex-direction: column; gap: 5px; padding: 16px; font-size: max(24px, 9px); }
