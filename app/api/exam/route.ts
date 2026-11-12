@@ -62,7 +62,11 @@ export async function POST(request: NextRequest) {
 
   const response = privateJson(exam);
   if (!existingTrack) {
-    response.cookies.set(TRACK_COOKIE_NAME, createTrackSessionToken(track), trackCookieOptions);
+    try {
+      response.cookies.set(TRACK_COOKIE_NAME, createTrackSessionToken(track), trackCookieOptions);
+    } catch {
+      return privateJson({ ok: false, message: "A secure student session could not be started. Please ask your teacher to check the site's session configuration." }, 503);
+    }
   }
   return response;
 }

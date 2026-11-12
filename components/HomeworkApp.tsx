@@ -48,6 +48,26 @@ const TRACK_DETAILS: Record<Tier, { papers: string; detail: string }> = {
   },
 };
 
+async function readApiResponse(response: Response, fallbackMessage: string): Promise<Record<string, unknown>> {
+  let data: unknown = null;
+  try {
+    const text = await response.text();
+    if (text.trim()) data = JSON.parse(text);
+  } catch {
+    data = null;
+  }
+
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    const status = response.status ? ` (HTTP ${response.status})` : "";
+    throw new Error(`The server returned an empty or unreadable response${status}. Refresh the page and try again. If this continues, ask your teacher to check the site configuration.`);
+  }
+  const payload = data as Record<string, unknown>;
+  if (!response.ok) {
+    throw new Error(typeof payload.message === "string" ? payload.message : fallbackMessage);
+  }
+  return payload;
+}
+
 export default function HomeworkApp() {
   const [studentName, setStudentName] = useState("");
   const [selectedTrack, setSelectedTrack] = useState<Tier | null>(null);
@@ -109,9 +129,8 @@ export default function HomeworkApp() {
         credentials: "same-origin",
         body: JSON.stringify({ homeworkPassword, track: chosenTrack }),
       });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.message || "The exam could not be opened.");
-      const nextExam = data as ExamPayload;
+      const data = await readApiResponse(response, "The exam could not be opened.");
+      const nextExam = data as unknown as ExamPayload;
       const savedKey = progressKeyFor(studentName, chosenTrack);
       let restoredAnswers: Record<string, string> = {};
       let hadSavedAnswers = false;
@@ -184,9 +203,8 @@ export default function HomeworkApp() {
         credentials: "same-origin",
         body: JSON.stringify({ markingPassword, answers, track: exam.track }),
       });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.message || "Marking could not be completed.");
-      setResult(data as MarkResult);
+      const data = await readApiResponse(response, "Marking could not be completed.");
+      setResult(data as unknown as MarkResult);
       setMarkingPassword("");
       setMarkError("");
       window.setTimeout(() => document.getElementById("results-panel")?.scrollIntoView({ behavior: "smooth", block: "start" }), 80);
