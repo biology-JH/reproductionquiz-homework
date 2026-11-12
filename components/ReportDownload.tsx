@@ -1,14 +1,40 @@
 "use client";
 
 import { useState } from "react";
-import type { MarkResult } from "@/lib/types";
+import type { MarkResult, PublicQuestion } from "@/lib/types";
 
 interface Props {
   studentName: string;
   result: MarkResult;
+  questions: PublicQuestion[];
+  answers: Record<string, string>;
 }
 
-export default function ReportDownload({ studentName, result }: Props) {
+async function imageAsPngDataUrl(src: string): Promise<{ dataUrl: string; width: number; height: number }> {
+  const response = await fetch(src, { credentials: "same-origin", cache: "force-cache" });
+  if (!response.ok) throw new Error("A figure could not be loaded for the marked script.");
+  const blob = await response.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  try {
+    const image = new Image();
+    image.src = objectUrl;
+    await image.decode();
+    const scale = Math.min(1, 1800 / Math.max(image.naturalWidth, image.naturalHeight));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+    canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("The browser could not prepare a figure.");
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    return { dataUrl: canvas.toDataURL("image/png"), width: canvas.width, height: canvas.height };
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
+export default function ReportDownload({ studentName, result, questions, answers }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -17,58 +43,91 @@ export default function ReportDownload({ studentName, result }: Props) {
     setError("");
     try {
       const { jsPDF } = await import("jspdf");
-      const pdf = new jsPDF({ format: "a4", unit: "mm" });
-      const left = 18;
-      const right = 192;
+      const pdf = new jsPDF({ format: "a4", unit: "mm", compress: true });
+      const left = 17;
+      const right = 193;
+      const contentWidth = right - left;
+      const lineHeight = 12.5;
+      const pageBottom = 279;
       let y = 20;
-      const lineHeight = 9.5;
+      const embeddedFigures = new Set<string>();
+      const markById = new Map(result.markScheme.map((item) => [item.id, item]));
 
-      function write(text: string, options: { size?: number; bold?: boolean; gap?: number } = {}) {
-        const { size = 10, bold = false, gap = 2.5 } = options;
+      function newPage() {
+        pdf.addPage();
+        y = 20;
+      }
+
+      function write(text: string, options: { bold?: boolean; gap?: number; color?: [number, number, number] } = {}) {
+        const { bold = false, gap = 3, color = [33, 42, 34] } = options;
+        pdf.setTextColor(...color);
         pdf.setFont("times", bold ? "bold" : "normal");
-        pdf.setFontSize(Math.max(24, size));
-        const lines = pdf.splitTextToSize(text, right - left);
-        const height = lines.length * lineHeight;
-        if (y + height > 276) {
-          pdf.addPage();
-          y = 20;
+        pdf.setFontSize(24);
+        const safeText = text.trim() || "—";
+        const lines = pdf.splitTextToSize(safeText, contentWidth) as string[];
+        for (const line of lines) {
+          if (y + lineHeight > pageBottom) newPage();
+          pdf.text(line, left, y);
+          y += lineHeight;
         }
-        pdf.text(lines, left, y);
-        y += height + gap;
+        y += gap;
       }
 
-      pdf.setTextColor(33, 78, 52);
-      write("REPRODUCTION MASTERY | IGCSE BIOLOGY 0610", { size: 10, bold: true, gap: 4 });
-      pdf.setTextColor(25, 35, 29);
-      write("Chapter 16 marked practice report", { size: 21, bold: true, gap: 3 });
-      write(`Student: ${studentName || "Student"}`, { size: 12, bold: true });
-      write(`Date: ${new Date(result.completedAt).toLocaleDateString("en-GB", { day: "2-digit", month: "long", year: "numeric" })}`);
-      write(`Total score: ${result.score} / ${result.maxMarks} (${result.percent.toFixed(1)}%)`, { size: 13, bold: true, gap: 2 });
-      write(`Core: ${result.coreScore} / ${result.coreMax}  |  Extended: ${result.extendedScore} / ${result.extendedMax}`);
-      write(`Informal practice estimate: ${result.gradeEstimate}. This is not an official Cambridge grade boundary or grade prediction.`, { size: 9, gap: 4 });
-      pdf.setDrawColor(214, 168, 75);
-      pdf.line(left, y, right, y);
-      y += 8;
-
-      write("Corrections to review", { size: 16, bold: true, gap: 4 });
-      if (result.incorrect.length === 0) {
-        write("No automatically marked responses needed correction. Ask a teacher to inspect the biological drawing itself.");
+      async function embedFigure(figure: NonNullable<PublicQuestion["figuresToDisplay"]>[number]) {
+        if (embeddedFigures.has(figure.id)) return;
+        embeddedFigures.add(figure.id);
+        write(figure.caption, { bold: true, gap: 2, color: [33, 78, 52] });
+        const image = await imageAsPngDataUrl(figure.src);
+        const maxWidth = contentWidth;
+        const maxHeight = 100;
+        const scale = Math.min(maxWidth / image.width, maxHeight / image.height);
+        const width = image.width * scale;
+        const height = image.height * scale;
+        if (y + height > pageBottom) newPage();
+        pdf.addImage(image.dataUrl, "PNG", left, y, width, height, undefined, "FAST");
+        y += height + 8;
       }
-      for (const item of result.incorrect) {
-        write(`${item.id} · ${item.section} · ${item.awardedMarks}/${item.availableMarks} marks`, { size: 12, bold: true, gap: 2 });
-        write(`Question: ${item.prompt}`, { size: 10, gap: 1.5 });
-        write(`Your response: ${item.submittedAnswer}`, { size: 10, gap: 1.5 });
-        write(`Accepted answer: ${item.correctAnswer}`, { size: 10, gap: 1.5 });
-        write(`Correction / mark guidance: ${item.correction}`, { size: 10, gap: 5 });
-      }
-      write(`Drawing note: ${result.drawingNote}`, { size: 9, gap: 3 });
-      write("Unofficial practice feedback: the questions, accepted answers and correction notes are teacher-created from the supplied lesson material. They are not official Cambridge mark-scheme text and do not reproduce or claim endorsement by Cambridge International.", { size: 9, gap: 2 });
-      write("Written-response matching uses automated rules. A teacher should review valid alternative wording and drawing quality before using this report for consequential assessment.", { size: 9 });
 
+      pdf.setProperties({
+        title: `IGCSE Biology 0610 Chapter 16 marked script — ${studentName || "Student"}`,
+        subject: "Unofficial teacher-created practice report",
+        author: "Reproduction Mastery",
+      });
+      write("REPRODUCTION MASTERY · IGCSE BIOLOGY 0610", { bold: true, color: [33, 78, 52], gap: 4 });
+      write("Chapter 16 marked script", { bold: true, gap: 4 });
+      write(`Student: ${studentName || "Student"}`, { bold: true });
+      write(`Completed: ${new Date(result.completedAt).toLocaleDateString("en-GB", { day: "2-digit", month: "long", year: "numeric" })}`);
+      write(`Track: ${result.track} · Questions: ${questions.length}`);
+      write(`Total score: ${result.score} / ${result.maxMarks} (${result.percent.toFixed(1)}%)`, { bold: true });
+      write(`Core objectives: ${result.coreScore} / ${result.coreMax}`);
+      if (result.track === "Extended") write(`Supplement objectives: ${result.extendedScore} / ${result.extendedMax}`);
+      for (const paper of result.paperBreakdown) {
+        write(`${paper.paperLabel}: ${paper.score} / ${paper.maxMarks}`);
+      }
+      write(`Informal practice estimate: ${result.gradeEstimate}. This is not an official Cambridge grade boundary or grade prediction.`);
+      write("Unofficial practice mark scheme: questions, accepted answers and marking guidance are teacher-created from the supplied Chapter 16 lesson material. They are not official Cambridge International mark-scheme text.", { gap: 7 });
+
+      for (const question of questions) {
+        const marked = markById.get(question.id);
+        if (!marked) throw new Error(`The mark breakdown is incomplete for ${question.id}.`);
+        if (y + lineHeight * 3 > pageBottom) newPage();
+        pdf.setDrawColor(214, 168, 75);
+        pdf.line(left, y, right, y);
+        y += 6;
+        write(`${question.id} · ${question.paper} · ${question.section} objective · ${marked.awardedMarks}/${marked.marks} marks`, { bold: true, color: [33, 78, 52], gap: 2 });
+        write(`Question: ${question.prompt}`, { gap: 2 });
+        if (marked.figureRefs.length) write(`Figure reference${marked.figureRefs.length === 1 ? "" : "s"}: ${marked.figureRefs.join(", ")}`, { gap: 2 });
+        for (const figure of question.figuresToDisplay ?? []) await embedFigure(figure);
+        write(`Student answer: ${answers[question.id]?.trim() || "No response"}`, { gap: 2 });
+        write(`Accepted answer / correct response: ${marked.correctAnswer}`, { gap: 2 });
+        write(`Mark-scheme points / correction: ${marked.markPoints}`, { gap: 5 });
+      }
+
+      write("End of marked script", { bold: true, color: [33, 78, 52] });
       const safeName = (studentName || "student").trim().replace(/[^a-z0-9_-]+/gi, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "student";
-      pdf.save(`reproduction-mastery-${safeName}.pdf`);
-    } catch {
-      setError("The report could not be created in this browser. Please try again.");
+      pdf.save(`igcse-0610-ch16-${result.track.toLowerCase()}-marked-script-${safeName}.pdf`);
+    } catch (downloadError) {
+      setError(downloadError instanceof Error ? downloadError.message : "The report could not be created in this browser. Please try again.");
     } finally {
       setBusy(false);
     }
@@ -77,7 +136,7 @@ export default function ReportDownload({ studentName, result }: Props) {
   return (
     <div className="report-action">
       <button className="primary-button download-button" type="button" onClick={download} disabled={busy}>
-        {busy ? "Preparing PDF…" : "Download marked report PDF"}<span aria-hidden="true">↓</span>
+        {busy ? "Preparing marked script…" : "Download Marked Script (PDF)"}<span aria-hidden="true">↓</span>
       </button>
       {error && <p className="form-error" role="alert">{error}</p>}
     </div>

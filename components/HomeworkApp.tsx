@@ -3,7 +3,6 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import QuestionCard from "@/components/QuestionCard";
 import ReportDownload from "@/components/ReportDownload";
-import FigureGallery from "@/components/FigureGallery";
 import type { ExamPayload, MarkResult, PublicQuestion, Tier } from "@/lib/types";
 
 interface QuestionGroup {
@@ -30,15 +29,27 @@ function brandMark(size = 34) {
   return <img className="brand-mark" src="/reproduction-mark.svg" width={size} height={size} alt="" />;
 }
 
-const PROGRESS_KEY_PREFIX = "reproduction-mastery-0610-progress-v1";
+const PROGRESS_KEY_PREFIX = "reproduction-mastery-0610-progress-v2";
 
-function progressKeyFor(name: string) {
+function progressKeyFor(name: string, track: Tier) {
   const studentKey = name.trim().toLocaleLowerCase().replace(/\s+/g, "-");
-  return `${PROGRESS_KEY_PREFIX}:${studentKey}`;
+  return `${PROGRESS_KEY_PREFIX}:${track}:${studentKey}`;
 }
+
+const TRACK_DETAILS: Record<Tier, { papers: string; detail: string }> = {
+  Core: {
+    papers: "Paper 1 · Paper 3 · Paper 6",
+    detail: "Core syllabus objectives only, including application and practical reasoning.",
+  },
+  Extended: {
+    papers: "Paper 2 · Paper 4 · Paper 6",
+    detail: "Core plus Supplement objectives, with the Extended questions designed to be more demanding.",
+  },
+};
 
 export default function HomeworkApp() {
   const [studentName, setStudentName] = useState("");
+  const [selectedTrack, setSelectedTrack] = useState<Tier | null>(null);
   const [homeworkPassword, setHomeworkPassword] = useState("");
   const [markingPassword, setMarkingPassword] = useState("");
   const [exam, setExam] = useState<ExamPayload | null>(null);
@@ -48,15 +59,12 @@ export default function HomeworkApp() {
   const [markError, setMarkError] = useState("");
   const [unlocking, setUnlocking] = useState(false);
   const [marking, setMarking] = useState(false);
-  const [progressStatus, setProgressStatus] = useState("Your typed answers and sketch save locally on this device as you work.");
+  const [progressStatus, setProgressStatus] = useState("Typed answers autosave on this device after the exam is opened. Passwords are never saved.");
   const skipNextAutosave = useRef(false);
-  const [progressResetSignal, setProgressResetSignal] = useState(0);
 
-  const coreQuestions = useMemo(() => exam?.questions.filter((question) => question.section === "Core") ?? [], [exam]);
-  const extendedQuestions = useMemo(() => exam?.questions.filter((question) => question.section === "Extended") ?? [], [exam]);
   const answeredCount = useMemo(
-    () => Object.values(answers).filter((answer) => answer.trim().length > 0).length,
-    [answers],
+    () => exam?.questions.filter((question) => Boolean(answers[question.id]?.trim())).length ?? 0,
+    [exam, answers],
   );
 
   useEffect(() => {
@@ -66,8 +74,9 @@ export default function HomeworkApp() {
       return;
     }
     try {
-      window.localStorage.setItem(progressKeyFor(studentName), JSON.stringify({
-        version: 1,
+      window.localStorage.setItem(progressKeyFor(studentName, exam.track), JSON.stringify({
+        version: 2,
+        track: exam.track,
         studentName: studentName.trim(),
         answers,
         savedAt: new Date().toISOString(),
@@ -85,41 +94,50 @@ export default function HomeworkApp() {
       setGateError("Enter your name before opening the assignment.");
       return;
     }
+    if (!selectedTrack) {
+      setGateError("Select exactly one track before starting.");
+      return;
+    }
+    const chosenTrack = selectedTrack;
     setUnlocking(true);
     try {
       const response = await fetch("/api/exam", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         cache: "no-store",
-        body: JSON.stringify({ homeworkPassword }),
+        credentials: "same-origin",
+        body: JSON.stringify({ homeworkPassword, track: chosenTrack }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || "The exam could not be opened.");
       const nextExam = data as ExamPayload;
+      const savedKey = progressKeyFor(studentName, chosenTrack);
       let restoredAnswers: Record<string, string> = {};
-      let savedDrawing = false;
+      let hadSavedAnswers = false;
       try {
-        savedDrawing = Boolean(window.localStorage.getItem(`${progressKeyFor(studentName)}:drawing:C02u`));
-        const saved = window.localStorage.getItem(progressKeyFor(studentName));
+        const saved = window.localStorage.getItem(savedKey);
         if (saved) {
-          const parsed = JSON.parse(saved) as { version?: number; answers?: unknown };
-          if (parsed.version === 1 && parsed.answers && typeof parsed.answers === "object" && !Array.isArray(parsed.answers)) {
+          const parsed = JSON.parse(saved) as { version?: number; track?: Tier; answers?: unknown };
+          if ((parsed.version === 1 || parsed.version === 2) && parsed.answers && typeof parsed.answers === "object" && !Array.isArray(parsed.answers)) {
             const validIds = new Set(nextExam.questions.map((question) => question.id));
             restoredAnswers = Object.fromEntries(
               Object.entries(parsed.answers as Record<string, unknown>)
                 .filter(([id, value]) => validIds.has(id) && typeof value === "string")
                 .map(([id, value]) => [id, String(value).slice(0, 8000)]),
             );
+            hadSavedAnswers = Object.values(restoredAnswers).some((answer) => answer.trim());
           }
         }
+        // Remove legacy sketch data from the previous version; this app no longer stores drawings.
+        window.localStorage.removeItem(`reproduction-mastery-0610-progress-v1:${studentName.trim().toLocaleLowerCase().replace(/\s+/g, "-")}:drawing:C02u`);
       } catch {
         setProgressStatus("Saved progress could not be read; a fresh attempt is ready.");
       }
+      skipNextAutosave.current = false;
       setAnswers(restoredAnswers);
-      setProgressStatus(Object.values(restoredAnswers).some((answer) => answer.trim()) || savedDrawing
-        ? "Previous progress restored from this device."
-        : "Autosave is ready. Passwords are never saved.");
+      setProgressStatus(hadSavedAnswers ? "Previous typed answers restored from this device." : "Autosave is ready. Passwords are never saved.");
       setExam(nextExam);
+      setSelectedTrack(nextExam.track);
       setHomeworkPassword("");
       setGateError("");
       window.scrollTo({ top: 0, behavior: "smooth" });
@@ -137,17 +155,16 @@ export default function HomeworkApp() {
   }
 
   function clearMyProgress() {
-    if (!window.confirm("Clear this student's saved answers and restart the exam? This cannot be undone. Passwords are not saved.")) return;
+    if (!exam) return;
+    if (!window.confirm("Clear this student's saved answers and restart the selected track? This cannot be undone. Passwords are not saved.")) return;
     try {
-      window.localStorage.removeItem(progressKeyFor(studentName));
-      window.localStorage.removeItem(`${progressKeyFor(studentName)}:drawing:C02u`);
+      window.localStorage.removeItem(progressKeyFor(studentName, exam.track));
       skipNextAutosave.current = true;
       setAnswers({});
-      setProgressResetSignal((value) => value + 1);
       setResult(null);
       setMarkingPassword("");
       setMarkError("");
-      setProgressStatus("Saved answers and sketch cleared. New work will save locally as you continue.");
+      setProgressStatus("Saved answers cleared. New typed answers will autosave locally as you continue.");
     } catch {
       setProgressStatus("The browser could not clear LocalStorage. You can remove this site's data in browser settings.");
     }
@@ -155,6 +172,7 @@ export default function HomeworkApp() {
 
   async function requestMarking(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!exam) return;
     setMarkError("");
     setMarking(true);
     try {
@@ -162,7 +180,8 @@ export default function HomeworkApp() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         cache: "no-store",
-        body: JSON.stringify({ markingPassword, answers }),
+        credentials: "same-origin",
+        body: JSON.stringify({ markingPassword, answers, track: exam.track }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || "Marking could not be completed.");
@@ -192,19 +211,38 @@ export default function HomeworkApp() {
             <p className="eyebrow"><span className="eyebrow-rule" /> CAMBRIDGE IGCSE BIOLOGY 0610</p>
             <h1>Reproduction,<br /><em>under the microscope.</em></h1>
             <p className="welcome-copy">
-              A rigorous Chapter 16 practice paper built from your class slides: reproduction in plants and humans, hormonal control, STIs and practical reasoning.
+              Challenging Chapter 16 practice based only on your class slides: asexual and sexual reproduction, flowering plants, human reproduction, hormones, STIs and practical reasoning.
             </p>
             <div className="welcome-facts">
-              <div><strong>138</strong><span>questions</span></div>
-              <div><strong>182</strong><span>available marks</span></div>
-              <div><strong>Core → Extended</strong><span>in that order</span></div>
+              <div><strong>Chapter 16</strong><span>reproduction only</span></div>
+              <div><strong>Two tracks</strong><span>choose one per session</span></div>
+              <div><strong>HOTS</strong><span>apply · analyse · evaluate</span></div>
             </div>
-            <p className="welcome-note">Original teacher-created practice. Paper styles are modelled on the syllabus, not copied from Cambridge papers.</p>
+            <p className="welcome-note">Original teacher-created practice in Cambridge-style formats. This is not an official Cambridge assessment.</p>
           </section>
           <form className="gate-card" onSubmit={unlockExam}>
             <p className="eyebrow">GATE 01 <span className="gate-line" /></p>
-            <h2>Open the assignment</h2>
-            <p className="form-intro">Enter your name and the Homework Password from your teacher.</p>
+            <h2>Choose one track</h2>
+            <p className="form-intro">Your choice is locked to this browser session. You cannot open both tracks in the same session.</p>
+            <fieldset className="track-choice-set">
+              <legend>Select your exam track</legend>
+              {(["Core", "Extended"] as const).map((track) => (
+                <label className={`track-choice-option${selectedTrack === track ? " selected" : ""}`} key={track}>
+                  <input
+                    type="radio"
+                    name="exam-track"
+                    value={track}
+                    checked={selectedTrack === track}
+                    onChange={() => setSelectedTrack(track)}
+                  />
+                  <span className="track-choice-copy">
+                    <strong>{track}</strong>
+                    <span>{TRACK_DETAILS[track].papers}</span>
+                    <small>{TRACK_DETAILS[track].detail}</small>
+                  </span>
+                </label>
+              ))}
+            </fieldset>
             <label htmlFor="student-name">Student name</label>
             <input
               id="student-name"
@@ -229,59 +267,32 @@ export default function HomeworkApp() {
               required
             />
             {gateError && <p className="form-error" role="alert">{gateError}</p>}
-            <button className="primary-button" type="submit" disabled={unlocking}>
-              {unlocking ? "Checking access…" : "Unlock the exam"}<span aria-hidden="true">→</span>
+            <button className="primary-button" type="submit" disabled={unlocking || !selectedTrack}>
+              {unlocking ? "Checking access…" : "Unlock the selected track"}<span aria-hidden="true">→</span>
             </button>
-            <p className="privacy-note">The Homework Password is checked by the server and is never saved. Answers are autosaved locally only after access is granted.</p>
+            <p className="privacy-note">The Homework Password is checked by the server and is never saved. Answers autosave locally only after access is granted.</p>
           </form>
         </div>
         <footer className="site-footer welcome-footer">
-          <span>REPRODUCTION MASTERY</span><span>Independent practice · Not an official Cambridge assessment</span>
+          <span>REPRODUCTION MASTERY</span><span>Chapter 16 practice · Not an official Cambridge assessment</span>
         </footer>
       </main>
     );
   }
 
-  const markValue = (questions: PublicQuestion[]) => questions.reduce((sum, question) => sum + question.marks, 0);
   const progress = exam.questions.length ? Math.round((answeredCount / exam.questions.length) * 100) : 0;
-  const renderSection = (tier: Tier, questions: PublicQuestion[], anchor: string, index: string) => {
-    const groups = groupQuestions(questions);
-    return (
-      <section className={`exam-section ${tier.toLowerCase()}-section`} id={anchor} aria-labelledby={`${anchor}-title`}>
-        <header className="tier-heading">
-          <span className="tier-index">{index} / 02</span>
-          <div>
-            <p className="eyebrow">{tier.toUpperCase()} TIER</p>
-            <h2 id={`${anchor}-title`}>{tier}</h2>
-          </div>
-          <p className="tier-count">{questions.length} questions<br /><strong>{markValue(questions)} marks</strong></p>
-        </header>
-        <p className="tier-intro">
-          {tier === "Core"
-            ? "Build from clear biological knowledge and apply it carefully to the evidence."
-            : "Extended items are intentionally more demanding: connect ideas, interpret unfamiliar evidence and justify conclusions."}
-        </p>
-        {groups.map((group, groupIndex) => {
-          const visual = exam.visuals[group.id];
-          return (
-            <div className="question-group" key={`${tier}-${group.id}`}>
-              <header className="group-heading">
-                <span className="group-index">{String(groupIndex + 1).padStart(2, "0")}</span>
-                <div><h3>{group.title}</h3><p>{group.id} · {group.questions.length} question parts</p></div>
-                <span className="group-paper">{group.questions[0]?.paper}</span>
-              </header>
-              <div className="question-list">
-                {group.questions.map((question) => (
-                  <QuestionCard key={question.id} question={question} answer={answers[question.id] || ""} onChange={changeAnswer} visual={exam.visuals[question.id]} progressStorageKey={progressKeyFor(studentName)} drawingResetSignal={progressResetSignal} />
-                ))}
-              </div>
-              {visual && <FigureGallery visual={visual} />}
-            </div>
-          );
-        })}
-      </section>
-    );
-  };
+  const paperSections = ( ["Core", "Extended"] as const).flatMap((section) => {
+    const questionsByPaper = new Map<number, PublicQuestion[]>();
+    for (const question of exam.questions.filter((item) => item.section === section)) {
+      const paperNumber = question.paperNumber ?? 0;
+      const paperQuestions = questionsByPaper.get(paperNumber) ?? [];
+      paperQuestions.push(question);
+      questionsByPaper.set(paperNumber, paperQuestions);
+    }
+    return [...questionsByPaper.entries()]
+      .sort(([left], [right]) => left - right)
+      .map(([paperNumber, questions]) => ({ section, paperNumber, questions }));
+  });
 
   return (
     <main className="exam-page" id="top">
@@ -290,9 +301,8 @@ export default function HomeworkApp() {
           {brandMark()}
           <span><strong>Reproduction</strong><small>MASTERY · 0610</small></span>
         </a>
-        <nav className="exam-nav" aria-label="Exam sections">
-          <a href="#core-section">Core</a>
-          <a href="#extended-section">Extended</a>
+        <nav className="exam-nav" aria-label="Selected exam sections">
+          {paperSections.map(({ section, paperNumber }) => <a href={`#${section.toLowerCase()}-paper-${paperNumber}-section`} key={`${section}-${paperNumber}`}>{section === "Extended" ? "Supplement" : "Core"} · P{paperNumber}</a>)}
           <a className="nav-mark" href="#marking-gate">Mark my work ↓</a>
           <button className="clear-progress" type="button" onClick={clearMyProgress}>Clear My Progress</button>
         </nav>
@@ -303,8 +313,8 @@ export default function HomeworkApp() {
         <section className="exam-hero">
           <div>
             <p className="eyebrow"><span className="eyebrow-rule" /> CHAPTER 16 · REPRODUCTION</p>
-            <h1>Your practice paper.</h1>
-            <p>Take your time. Answer in your own words, show reasoning where asked, and use the data rather than guessing.</p>
+            <h1>{exam.track} track practice.</h1>
+            <p>{TRACK_DETAILS[exam.track].papers}. Use evidence, connect biological ideas and show your reasoning. Only Chapter 16 content is included.</p>
           </div>
           <div className="exam-overview">
             <div><span>Questions</span><strong>{exam.totals.questionCount}</strong></div>
@@ -314,12 +324,44 @@ export default function HomeworkApp() {
           <div className="progress-track" role="progressbar" aria-label="Questions answered" aria-valuenow={progress} aria-valuemin={0} aria-valuemax={100}>
             <span style={{ width: `${progress}%` }} />
           </div>
-          <p className="progress-caption">{progress}% answered · Core questions come first; Extended questions follow.</p>
+          <p className="progress-caption">{progress}% answered · {exam.track} track selected for this session.</p>
           <p className="autosave-status" role="status">{progressStatus} Use Clear My Progress on a shared device when finished.</p>
         </section>
 
-        {renderSection("Core", coreQuestions, "core-section", "01")}
-        {renderSection("Extended", extendedQuestions, "extended-section", "02")}
+        {paperSections.map(({ section, paperNumber, questions }, paperIndex) => {
+          const groups = groupQuestions(questions);
+          const paperMax = questions.reduce((sum, question) => sum + question.marks, 0);
+          const paperLabel = questions[0]?.paper ?? `Paper ${paperNumber}`;
+          const sectionLabel = section === "Extended" ? "Supplement" : "Core";
+          const sectionId = `${section.toLowerCase()}-paper-${paperNumber}-section`;
+          return (
+            <section className={`exam-section paper-section ${section.toLowerCase()}-section paper-${paperNumber}`} id={sectionId} aria-labelledby={`${sectionId}-title`} key={`${section}-${paperNumber}`}>
+              <header className="tier-heading">
+                <span className="tier-index">{String(paperIndex + 1).padStart(2, "0")} / {String(paperSections.length).padStart(2, "0")}</span>
+                <div>
+                  <p className="eyebrow">{exam.track.toUpperCase()} TRACK · {sectionLabel.toUpperCase()} QUESTIONS</p>
+                  <h2 id={`${sectionId}-title`}>Paper {paperNumber}</h2>
+                </div>
+                <p className="tier-count">{questions.length} questions<br /><strong>{paperMax} marks</strong></p>
+              </header>
+              <p className="tier-intro">{paperLabel}. {sectionLabel} questions are grouped here; the Extended track presents all Core questions before Supplement questions.</p>
+              {groups.map((group, groupIndex) => (
+                <div className="question-group" key={`${paperNumber}-${group.id}`}>
+                  <header className="group-heading">
+                    <span className="group-index">{String(groupIndex + 1).padStart(2, "0")}</span>
+                    <div><h3>{group.title}</h3><p>{group.id} · {group.questions.length} question parts</p></div>
+                    <span className="group-paper">{group.questions[0]?.paper}</span>
+                  </header>
+                  <div className="question-list">
+                    {group.questions.map((question) => (
+                      <QuestionCard key={question.id} question={question} answer={answers[question.id] || ""} onChange={changeAnswer} />
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </section>
+          );
+        })}
 
         <section className="marking-gate" id="marking-gate" aria-labelledby="marking-title">
           {!result ? (
@@ -327,8 +369,8 @@ export default function HomeworkApp() {
               <div className="marking-copy">
                 <p className="eyebrow">GATE 02 <span className="gate-line" /></p>
                 <h2 id="marking-title">Ready for your feedback?</h2>
-                <p>Submit your answers with the separate Marking Password. The server checks responses and returns corrections only after that password is accepted.</p>
-                <p className="unofficial-note">Written answers use transparent keyword rules, so ask your teacher to review any valid alternative wording that the automatic check may not recognise.</p>
+                <p>Submit your answers with the separate Marking Password. Only this session's selected track will be marked, and answers/corrections are returned only after the password is accepted.</p>
+                <p className="unofficial-note">Written answers use transparent teacher-authored keyword rules. Ask your teacher to review valid alternative wording that an automatic check may not recognise.</p>
               </div>
               <form className="marking-form" onSubmit={requestMarking}>
                 <label htmlFor="marking-password">Marking Password</label>
@@ -354,30 +396,32 @@ export default function HomeworkApp() {
             <section className="results-panel" id="results-panel" aria-live="polite">
               <div className="result-heading">
                 <div>
-                  <p className="eyebrow">MARKING COMPLETE</p>
+                  <p className="eyebrow">MARKING COMPLETE · {result.track.toUpperCase()} TRACK</p>
                   <h2 id="marking-title">Your result, {studentName.trim()}.</h2>
                 </div>
                 <div className="score-stamp"><strong>{result.score}<small> / {result.maxMarks}</small></strong><span>{result.percent.toFixed(1)}%</span></div>
               </div>
               <div className="result-facts">
-                <div><span>Core</span><strong>{result.coreScore} / {result.coreMax}</strong></div>
-                <div><span>Extended</span><strong>{result.extendedScore} / {result.extendedMax}</strong></div>
+                {result.paperBreakdown.map((paper) => (
+                  <div key={paper.paperNumber}><span>Paper {paper.paperNumber}</span><strong>{paper.score} / {paper.maxMarks}</strong></div>
+                ))}
+                <div><span>Core objectives</span><strong>{result.coreScore} / {result.coreMax}</strong></div>
+                {result.track === "Extended" && <div><span>Supplement objectives</span><strong>{result.extendedScore} / {result.extendedMax}</strong></div>}
                 <div><span>Practice estimate</span><strong>{result.gradeEstimate}</strong></div>
               </div>
-              <p className="grade-disclaimer">Informal Chapter 16 practice indicator only. This is not a Cambridge grade boundary or a prediction of a final qualification grade.</p>
-              <p className="drawing-disclaimer">{result.drawingNote}</p>
-              <ReportDownload studentName={studentName.trim()} result={result} />
+              <p className="grade-disclaimer">Informal Chapter 16 practice indicator only. This is not an official Cambridge grade boundary or a prediction of a final qualification grade.</p>
+              <ReportDownload studentName={studentName.trim()} result={result} questions={exam.questions} answers={answers} />
               <div className="corrections-heading">
                 <div><p className="eyebrow">FEEDBACK</p><h3>Corrections to review</h3></div>
                 <span>{result.incorrect.length} item{result.incorrect.length === 1 ? "" : "s"}</span>
               </div>
               {result.incorrect.length === 0 ? (
-                <p className="no-errors">All automatically marked responses matched the answer rules. Ask your teacher to inspect the drawing itself.</p>
+                <p className="no-errors">All automatically marked responses matched the current practice answer rules. Download the marked script for the complete question-by-question answer breakdown.</p>
               ) : (
                 <div className="correction-list">
                   {result.incorrect.map((item) => (
                     <article className="correction-card" key={item.id}>
-                      <div className="correction-meta"><strong>{item.id}</strong><span>{item.section}</span><span>{item.awardedMarks} / {item.availableMarks} marks</span></div>
+                      <div className="correction-meta"><strong>{item.id}</strong><span>{item.paper}</span><span>{item.section} objective</span><span>{item.awardedMarks} / {item.availableMarks} marks</span></div>
                       <p className="correction-prompt">{item.prompt}</p>
                       <p><span className="feedback-label">Your response</span>{item.submittedAnswer}</p>
                       <p><span className="feedback-label">Accepted answer</span>{item.correctAnswer}</p>

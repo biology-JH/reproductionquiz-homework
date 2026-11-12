@@ -1,31 +1,52 @@
 # Reproduction Mastery — IGCSE Biology 0610
 
-Single-page Next.js homework app for an original Chapter 16 Reproduction practice exam built from five supplied biology slide decks.
+A large-print, two-track Chapter 16 reproduction practice application built from five teacher-supplied PowerPoint decks. The app uses original figures extracted from those slides and teacher-authored practice questions; it is not an official Cambridge International paper.
+
+## Student experience
+
+- Students select exactly one track before opening the exam: **Core** (Papers 1, 3 and 6) or **Extended** (Papers 2, 4 and 6).
+- The Homework Password is checked by the server. A signed, HttpOnly, Secure, SameSite=None session cookie locks that browser session to its chosen track.
+- Extended presents all Core questions first, followed by Supplement-only questions. Core and Extended may share subject matter or figures, but each selected track contains no duplicate question or repeated source image.
+- The application uses at least 24px type. Typed/selected answers autosave in browser LocalStorage, separated by student and track; passwords are never stored there.
+- A separate Marking Password is required before the server decrypts the teacher key and returns marks, corrections and the complete mark-scheme breakdown. The results include an explicitly informal practice estimate, not an official Cambridge grade boundary.
+- The results screen provides **Download Marked Script (PDF)** with the full questions, original figures, submitted responses, accepted answers, teacher-authored marking guidance and score breakdown. PDF body text is 24pt or larger.
+- No student drawing or sketch tasks are included.
+
+## Content and coverage
+
+The public, answer-free bank contains 104 Core questions and 33 Supplement-only questions (137 unique IDs; 178 marks across the Extended exam). Every prompt uses an application, analysis or evaluation context, including multiple-choice, structured/data-analysis and alternative-to-practical formats. The exact section-by-section syllabus map—and the explicitly requested exception for student-produced drawings—is in [Chapter16_Syllabus_Coverage.md](Chapter16_Syllabus_Coverage.md).
+
+Original PowerPoint figures are stored in `public/figures/`. `server/track-content.ts` assembles each track, remaps Core paper styles for the Extended track, assigns figure IDs and enforces track-local question/source-image uniqueness.
+
+## Password and answer-key handling
+
+Set the following **server-only** environment variables for the target runtime:
+
+- `HOMEWORK_PASSWORD` — opens the selected exam track.
+- `MARKING_PASSWORD` — authorizes marking and is also the password-derived decryption key for the server-only AES-256-GCM answer-key ciphertext in `server/master_key.ts`.
+- `TRACK_SESSION_SECRET` — signs the short-lived, HttpOnly selected-track cookie.
+
+Never put secret values in source files, documentation, client components, public assets or Git. The public `server/exam-content.ts` contains question text and figure metadata only. The encrypted answer key is imported only by `app/api/mark/route.ts`, which checks the Marking Password before decryption and uses no-store response headers. The classroom password gate is a shared-password convenience, not a replacement for individual student identity controls.
 
 ## Local development
 
-Use Node.js 22 and the pinned pnpm version in `package.json`:
+Use Node.js and pnpm from the included lockfile:
 
-```sh
+```bash
 pnpm install
-cp .env.example .env.local
 pnpm dev
 ```
 
-Set `HOMEWORK_PASSWORD` and `MARKING_PASSWORD` in `.env.local` for local testing. Never commit `.env.local` or share its values. The answer key in `server/master_key.ts` is ciphertext, imported only by the server marking route and decrypted only after the marking gate accepts the password.
+Required variables should be supplied through the hosting platform's protected environment-variable interface or a private ignored `.env.local` for local work. Do not commit `.env.local`.
 
-## Production deployment
+Useful checks:
 
-Deploy the private GitHub repository as a Next.js project. Configure `HOMEWORK_PASSWORD` and `MARKING_PASSWORD` as sensitive server-side environment values for the target deployment environment. Do not add a `NEXT_PUBLIC_` prefix, and do not use development/test values in production.
+```bash
+pnpm typecheck
+pnpm build
+python3 scripts/validate_exam_bank.py
+```
 
-The UI receives question text and diagrams only after the first server-side gate. The answer-key ciphertext remains outside the client bundle; only the Node marking route can decrypt it after validating the second password. API responses use `Cache-Control: private, no-store`. Typed answers and the flower sketch are saved only in browser LocalStorage; they are not written to a database or server file, and the sketch is never sent to the grading endpoint.
+## Printable and offline teacher materials
 
-## Assessment notes
-
-The auto-marker uses deterministic accepted-answer and keyword rules. Teachers should review unusual valid wording. The flower drawing pad is local-only and never uploaded; the instant mark checks its six typed labels, not sketch quality or placement. All typed text in the print exam and student workbook is at least 24 pt; the website and marked-report PDF also enforce a minimum 24 px/pt respectively. Biology visuals are original image objects extracted from the uploaded PowerPoint decks, not generated replacement diagrams; the printable exam captions identify their source deck and slide.
-
-The grade band shown is an informal chapter-practice indicator, not an official Cambridge grade boundary or final-grade prediction. Corrections are teacher-created practice guidance, not Cambridge's official mark-scheme text. This app is not affiliated with or endorsed by Cambridge International.
-
-## Student progress storage
-
-After a student passes Gate 1, typed answers and the flower sketch are written to browser LocalStorage as they change, under keys separated by the entered student name. On a later visit, the app restores that student's saved answers and sketch after Gate 1 is accepted again. “Clear My Progress” removes both for the current student. Neither password is included in LocalStorage; the sketch is never uploaded or sent for marking. Students on shared devices should clear progress when finished.
+Track-specific printable exams and student answer workbooks are generated separately for Core and Extended. The teacher-only offline marker package contains a password-encrypted master workbook and an AES-GCM encrypted key payload. The grader prompts for the Marking Password without echo and does not reveal results on a failed password check. See the deliverables in the sibling `biology0610_reproduction_exam` folder.
