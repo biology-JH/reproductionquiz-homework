@@ -43,6 +43,7 @@ The existing **Specimen Notebook** visual direction is retained. It pairs the pr
 - **Interaction philosophy:** one unambiguous track choice, visible save status, keyboard-accessible response controls and explicit password gates; no hidden track switches.
 - **Animation:** limited to short, reduced-motion-aware transitions for section entry and progress feedback; no motion on essential reading content.
 - **Typography:** system serif for question reading paired with a clean sans-serif for controls and navigation. Browser text is at least 24 px. Printed exam/workbook/report text is at least 24 pt.
+- **Hero artwork:** on the welcome screen, scale the existing uncropped flower/reproduction image to a much more prominent width (up to about 840 px on desktop), preserve its natural aspect ratio, and keep the title and gate controls clear at every breakpoint.
 - **Brand essence:** original, visual Chapter 16 practice for IGCSE learners; precise, calm, demanding.
 - **Brand voice:** direct and evidence-centred. Example lines: “Use the figure and the data to support your conclusion.” “Choose one track; your session stays on that track.”
 - **Wordmark and mark:** the existing “Reproduction Mastery” wordmark with the project’s compact plant/specimen emblem; preserve the authored SVG rather than default text-only branding.

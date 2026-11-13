@@ -234,7 +234,7 @@ export default function HomeworkApp() {
                 alt="A pink blossom releases pollen beside an open seed pod and seeds beginning to germinate in soil."
                 width={1072}
                 height={624}
-                sizes="(max-width: 820px) 100vw, 52vw"
+                sizes="(max-width: 820px) 100vw, (max-width: 1440px) 62vw, 840px"
                 priority
               />
               <figcaption>
