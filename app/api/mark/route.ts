@@ -6,22 +6,32 @@ import { TRACK_COOKIE_NAME, verifyTrackSessionToken } from "@/lib/track-session"
 import type { MarkSchemeItem, PaperScore, Tier } from "@/lib/types";
 import { encryptedMasterKey } from "@/server/master_key";
 import { buildTrackExam } from "@/server/track-content";
+import {
+  gradeOpenRouterBatch,
+  OpenRouterGradeError,
+  type AiGradeInput,
+  type AiGradeResult,
+  type MasterQuestionRule,
+} from "@/server/openrouter-grading";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-interface MasterQuestion {
-  id: string;
-  section: Tier;
-  marks: number;
-  type: string;
-  prompt: string;
-  answer?: string;
-  accept?: string[] | string;
-  groups?: Array<string[] | string>;
-  rubric?: string;
-}
+type MasterQuestion = MasterQuestionRule;
+type PendingAiGrade = { paperNumber: number; input: AiGradeInput };
+
+type GradePayload = {
+  markingPassword?: unknown;
+  answers?: unknown;
+  track?: unknown;
+  tier?: unknown;
+  question?: unknown;
+  questionId?: unknown;
+  studentAnswer?: unknown;
+  // Intentionally accepted for compatibility with the documented payload, but never trusted.
+  markScheme?: unknown;
+};
 
 function privateJson(body: unknown, status = 200) {
   return NextResponse.json(body, {
@@ -87,14 +97,14 @@ function markQuestion(question: MasterQuestion, responseValue: unknown): { score
 
   if (question.type === "choice" || question.type === "exact") {
     const correct = acceptedValues(question).some((value) => normalize(value) === normalize(response));
-    return { score: correct ? maximum : 0, note: "The response is checked against the teacher-authored accepted answer." };
+    return { score: correct ? maximum : 0, note: "The response was checked against the teacher-authored accepted answer." };
   }
 
   if (question.type === "numeric") {
     const submitted = Number(response.replace(/%/g, "").trim());
     const expected = Number(question.answer);
     const correct = Number.isFinite(submitted) && Number.isFinite(expected) && submitted === expected;
-    return { score: correct ? maximum : 0, note: "The response is checked against the teacher-authored numerical answer." };
+    return { score: correct ? maximum : 0, note: "The response was checked against the teacher-authored numerical answer." };
   }
 
   if (question.type === "contains") {
@@ -102,7 +112,7 @@ function markQuestion(question: MasterQuestion, responseValue: unknown): { score
     if (!groups.length) return { score: 0, note: "No automatic marking rule was available." };
     const hits = groups.filter((group) => containsAlias(response, Array.isArray(group) ? group : [group])).length;
     const score = groups.length > maximum ? Math.floor((hits * maximum) / groups.length) : Math.min(maximum, hits);
-    return { score, note: "Keyword-rule practice self-check; valid alternative wording may need teacher review." };
+    return { score, note: "Written response requires the protected AI grading path." };
   }
 
   return { score: 0, note: "This response needs teacher review." };
@@ -142,6 +152,68 @@ function gradeEstimate(percent: number): string {
   return "Below G practice band";
 }
 
+function taskCharacters(input: AiGradeInput): number {
+  return input.question.prompt.length
+    + (input.question.rubric?.length ?? 0)
+    + input.studentAnswer.length
+    + JSON.stringify(input.question.groups ?? []).length
+    + acceptedValues(input.question).join(";").length;
+}
+
+function makeAiBatches(pending: PendingAiGrade[]): AiGradeInput[][] {
+  const byPaper = new Map<number, PendingAiGrade[]>();
+  for (const item of pending) {
+    const paperItems = byPaper.get(item.paperNumber) ?? [];
+    paperItems.push(item);
+    byPaper.set(item.paperNumber, paperItems);
+  }
+
+  const batches: AiGradeInput[][] = [];
+  for (const paperItems of byPaper.values()) {
+    let current: AiGradeInput[] = [];
+    let chars = 0;
+    for (const item of paperItems) {
+      const size = taskCharacters(item.input);
+      if (size > 24_000) throw new OpenRouterGradeError("A written response or rubric is too large to grade. Shorten the response and try again.");
+      if (current.length >= 18 || (current.length > 0 && chars + size > 24_000)) {
+        batches.push(current);
+        current = [];
+        chars = 0;
+      }
+      current.push(item.input);
+      chars += size;
+    }
+    if (current.length) batches.push(current);
+  }
+  return batches;
+}
+
+async function gradeConstructedResponses(pending: PendingAiGrade[]): Promise<Map<string, AiGradeResult>> {
+  const output = new Map<string, AiGradeResult>();
+  if (!pending.length) return output;
+  const apiKey = process.env.OPENROUTER_API_KEY?.trim();
+  if (!apiKey) throw new OpenRouterGradeError("OpenRouter grading is not configured. Ask your teacher to check the server settings.");
+
+  const batches = makeAiBatches(pending);
+  const settled = await Promise.allSettled(batches.map((batch) => gradeOpenRouterBatch(batch, apiKey)));
+  const failure = settled.find((item): item is PromiseRejectedResult => item.status === "rejected");
+  if (failure) {
+    if (failure.reason instanceof OpenRouterGradeError) throw failure.reason;
+    throw new OpenRouterGradeError("AI marking could not be completed. Your saved answers are unchanged; please retry shortly.");
+  }
+  for (const item of settled) {
+    if (item.status !== "fulfilled") continue;
+    for (const grade of item.value) output.set(grade.questionId, grade);
+  }
+  if (output.size !== pending.length) throw new OpenRouterGradeError("AI marking returned an incomplete answer set. No partial score was released; please retry.");
+  return output;
+}
+
+function parsePayload(value: unknown): GradePayload | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as GradePayload;
+}
+
 export async function POST(request: NextRequest) {
   const sessionTrack = verifyTrackSessionToken(request.cookies.get(TRACK_COOKIE_NAME)?.value);
   if (!sessionTrack) return privateJson({ ok: false, message: "Open the exam with the Homework Password before requesting marking." }, 401);
@@ -159,31 +231,21 @@ export async function POST(request: NextRequest) {
   } catch {
     return privateJson({ ok: false, message: "Submit the answers and Marking Password to continue." }, 400);
   }
-  if (!body || typeof body !== "object" || Array.isArray(body)) {
-    return privateJson({ ok: false, message: "The marking request must be a JSON object." }, 400);
-  }
-  const payload = body as { markingPassword?: unknown; answers?: unknown; track?: unknown };
-  if (payload.track !== sessionTrack) return privateJson({ ok: false, message: "The selected track does not match this browser session." }, 403);
+  const payload = parsePayload(body);
+  if (!payload) return privateJson({ ok: false, message: "The grading request must be a JSON object." }, 400);
+  const requestedTrack = payload.tier ?? payload.track;
+  if (requestedTrack !== sessionTrack) return privateJson({ ok: false, message: "The selected track does not match this browser session." }, 403);
 
   const supplied = typeof payload.markingPassword === "string" ? payload.markingPassword : "";
   if (supplied.length > 256 || !matchesSecret(supplied, expectedPassword)) {
     return privateJson({ ok: false, message: "That Marking Password was not accepted. No score or corrections were released." }, 401);
   }
 
-  if (!payload.answers || typeof payload.answers !== "object" || Array.isArray(payload.answers)) {
-    return privateJson({ ok: false, message: "Answers were missing or invalid." }, 400);
-  }
-  const responses = payload.answers as Record<string, unknown>;
   let exam;
   try {
     exam = buildTrackExam(sessionTrack);
   } catch {
     return privateJson({ ok: false, message: "This exam track is being updated and cannot be marked right now." }, 503);
-  }
-  const publicQuestions = exam.questions;
-  const publicById = new Map(publicQuestions.map((question) => [question.id, question]));
-  if (Object.keys(responses).some((id) => !publicById.has(id))) {
-    return privateJson({ ok: false, message: "The answer set contains questions outside this track." }, 400);
   }
 
   let decryptedQuestions: MasterQuestion[];
@@ -193,9 +255,87 @@ export async function POST(request: NextRequest) {
     return privateJson({ ok: false, message: "The protected answer key could not be loaded." }, 503);
   }
   const masterById = new Map(decryptedQuestions.map((question) => [question.id, question]));
-  const masterQuestions = publicQuestions.map((question) => masterById.get(question.id));
+  const publicById = new Map(exam.questions.map((question) => [question.id, question]));
+  const masterQuestions = exam.questions.map((question) => masterById.get(question.id));
   if (masterQuestions.some((question) => !question)) {
     return privateJson({ ok: false, message: "The protected marking data does not match this exam track." }, 503);
+  }
+
+  const isSingleQuestionRequest = payload.question !== undefined || payload.questionId !== undefined || payload.studentAnswer !== undefined;
+  if (isSingleQuestionRequest) {
+    const reference = typeof payload.question === "string"
+      ? payload.question.trim()
+      : typeof payload.questionId === "string"
+        ? payload.questionId.trim()
+        : "";
+    const publicQuestion = exam.questions.find((question) => question.id === reference || question.prompt.trim() === reference);
+    if (!publicQuestion) return privateJson({ ok: false, message: "Question was not found in this selected track." }, 404);
+    const masterQuestion = masterById.get(publicQuestion.id);
+    if (!masterQuestion) return privateJson({ ok: false, message: "The protected marking data does not match this question." }, 503);
+    const answer = typeof payload.studentAnswer === "string" ? payload.studentAnswer : "";
+    if (answer.length > 8_000) return privateJson({ ok: false, message: "A written response is too long to grade. Shorten it and try again." }, 413);
+    if (!answer.trim()) return privateJson({ score: `0/${masterQuestion.marks}`, isCorrect: false, feedback: "No response submitted." });
+
+    if (masterQuestion.type === "contains") {
+      try {
+        const [grade] = await gradeOpenRouterBatch([{
+          question: { ...masterQuestion, prompt: publicQuestion.prompt, section: publicQuestion.section },
+          studentAnswer: answer,
+          track: sessionTrack,
+          paper: publicQuestion.paper,
+        }], process.env.OPENROUTER_API_KEY?.trim() ?? "");
+        return privateJson({ score: `${grade.score}/${grade.maxMarks}`, isCorrect: grade.isCorrect, feedback: grade.feedback });
+      } catch (error) {
+        const message = error instanceof OpenRouterGradeError
+          ? error.message
+          : "AI marking could not be completed. Your answers are unchanged; please retry shortly.";
+        return privateJson({ ok: false, message }, 503);
+      }
+    }
+
+    const result = markQuestion(masterQuestion, answer);
+    const feedback = result.score === masterQuestion.marks
+      ? `Correct: ${result.note}`
+      : `${result.note} Accepted response: ${canonicalAnswer(masterQuestion)}`;
+    return privateJson({ score: `${result.score}/${masterQuestion.marks}`, isCorrect: result.score === masterQuestion.marks, feedback });
+  }
+
+  if (!payload.answers || typeof payload.answers !== "object" || Array.isArray(payload.answers)) {
+    return privateJson({ ok: false, message: "Answers were missing or invalid." }, 400);
+  }
+  const responses = payload.answers as Record<string, unknown>;
+  if (Object.keys(responses).some((id) => !publicById.has(id))) {
+    return privateJson({ ok: false, message: "The answer set contains questions outside this track." }, 400);
+  }
+  if (Object.values(responses).some((value) => typeof value === "string" && value.length > 8_000)) {
+    return privateJson({ ok: false, message: "A written response is too long to grade. Shorten it and submit again." }, 413);
+  }
+
+  const pending: PendingAiGrade[] = [];
+  for (let index = 0; index < exam.questions.length; index += 1) {
+    const publicQuestion = exam.questions[index];
+    const question = masterQuestions[index] as MasterQuestion;
+    const response = typeof responses[question.id] === "string" ? String(responses[question.id]) : "";
+    if (question.type !== "contains" || !response.trim()) continue;
+    pending.push({
+      paperNumber: publicQuestion.paperNumber ?? 0,
+      input: {
+        question: { ...question, prompt: publicQuestion.prompt, section: publicQuestion.section },
+        studentAnswer: response,
+        track: sessionTrack,
+        paper: publicQuestion.paper,
+      },
+    });
+  }
+
+  let aiGrades: Map<string, AiGradeResult>;
+  try {
+    aiGrades = await gradeConstructedResponses(pending);
+  } catch (error) {
+    const message = error instanceof OpenRouterGradeError
+      ? error.message
+      : "AI marking could not be completed. Your saved answers are unchanged; please retry shortly.";
+    return privateJson({ ok: false, message }, 503);
   }
 
   let score = 0;
@@ -214,18 +354,25 @@ export async function POST(request: NextRequest) {
     availableMarks: number;
     correctAnswer: string;
     correction: string;
+    feedback?: string;
+    criteria?: AiGradeResult["criteria"];
   }> = [];
   const markScheme: MarkSchemeItem[] = [];
   const paperScores = new Map<number, PaperScore>();
 
-  for (let index = 0; index < publicQuestions.length; index += 1) {
-    const publicQuestion = publicQuestions[index];
+  for (let index = 0; index < exam.questions.length; index += 1) {
+    const publicQuestion = exam.questions[index];
     const question = masterQuestions[index] as MasterQuestion;
-    const response = typeof responses[question.id] === "string" ? String(responses[question.id]).slice(0, 8000) : "";
-    const result = markQuestion(question, response);
+    const response = typeof responses[question.id] === "string" ? String(responses[question.id]) : "";
+    const aiGrade = aiGrades.get(question.id);
+    const result = aiGrade
+      ? { score: aiGrade.score, note: aiGrade.feedback }
+      : markQuestion(question, response);
     const correctAnswer = canonicalAnswer(question);
     const points = markingPoints(question);
-    const correction = question.rubric?.trim() || `A full-credit response should include: ${points}`;
+    const correction = aiGrade
+      ? `${aiGrade.feedback}\n\nReview the accepted response and criterion-level evidence below.`
+      : question.rubric?.trim() || `A full-credit response should include: ${points}`;
     score += result.score;
 
     if (question.section === "Core") {
@@ -260,6 +407,9 @@ export async function POST(request: NextRequest) {
       correctAnswer,
       markPoints: points,
       figureRefs: publicQuestion.figureRefs ?? [],
+      aiGraded: Boolean(aiGrade),
+      feedback: aiGrade?.feedback,
+      criteria: aiGrade?.criteria,
     });
 
     if (result.score < question.marks) {
@@ -273,7 +423,9 @@ export async function POST(request: NextRequest) {
         awardedMarks: result.score,
         availableMarks: question.marks,
         correctAnswer,
-        correction: `${correction}\n\nAuto-marker note: ${result.note}`,
+        correction,
+        feedback: aiGrade?.feedback,
+        criteria: aiGrade?.criteria,
       });
     }
   }

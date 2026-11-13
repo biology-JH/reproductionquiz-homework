@@ -124,6 +124,7 @@ h1, h2, h3 { font-family: 'Source Serif 4', Georgia, serif; font-weight: 500; le
 .unofficial-note { color: #7b6540 !important; font-size: max(24px, 11px !important); }
 .marking-form { align-self: center; }
 .marking-form label { margin-top: 0; }
+.ai-marking-status { margin: 13px 0 0; color: var(--forest); font-size: max(24px, 12px); font-weight: 700; }
 
 .results-panel { grid-column: 1 / -1; width: 100%; }
 .result-heading { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding-bottom: 20px; border-bottom: 1px solid var(--rule); }
@@ -150,6 +151,20 @@ h1, h2, h3 { font-family: 'Source Serif 4', Georgia, serif; font-weight: 500; le
 .correction-card p { margin: 8px 0; color: #535e54; font-size: max(24px, 12px); white-space: pre-wrap; overflow-wrap: anywhere; }
 .feedback-label { display: block; margin-bottom: 2px; color: #788176; font-size: max(24px, 9px); font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
 .no-errors { padding: 18px 0; color: var(--forest); }
+.ai-feedback-section { margin: 30px 0 10px; padding: 20px 0 8px; border-top: 1px solid #d5dbd0; }
+.ai-feedback-heading { display: flex; align-items: end; justify-content: space-between; gap: 20px; padding-bottom: 12px; border-bottom: 1px solid #d5dbd0; }
+.ai-feedback-heading .eyebrow { margin-bottom: 3px; }
+.ai-feedback-heading h3 { margin: 0; color: var(--forest-dark); font-size: max(24px, 25px); }
+.ai-feedback-heading > span { color: #697469; font-size: max(24px, 11px); }
+.ai-feedback-intro { max-width: 900px; color: #657064; font-size: max(24px, 12px); }
+.ai-feedback-card { padding: 18px 0 22px; border-bottom: 1px solid #e0e3d9; }
+.ai-feedback-card .correction-prompt { font-size: max(24px, 14px); }
+.ai-feedback-summary { color: #435347; font-size: max(24px, 12px); white-space: pre-wrap; overflow-wrap: anywhere; }
+.ai-criteria-list { display: grid; gap: 12px; margin: 15px 0 0; padding-left: 32px; }
+.ai-criteria-list li { padding: 8px 12px; border-left: 3px solid #d6a84b; background: rgba(232, 238, 228, .52); color: #38453a; font-size: max(24px, 12px); overflow-wrap: anywhere; }
+.ai-criterion-score { display: inline-block; margin-right: 10px; color: var(--forest); font-weight: 800; white-space: nowrap; }
+.ai-criterion-feedback { display: block; margin-top: 5px; color: #5f6b60; font-size: max(24px, 12px); }
+.ai-criteria-list blockquote { margin: 8px 0 2px; padding: 6px 12px; border-left: 2px solid #8ea08f; color: #5e675c; font-size: max(24px, 12px); font-style: italic; white-space: pre-wrap; }
 .final-note { margin: 20px 0 0; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; clip-path: inset(50%); }
 

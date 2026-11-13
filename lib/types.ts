@@ -47,6 +47,15 @@ export interface ExamPayload {
   };
 }
 
+export interface MarkingCriterion {
+  id: string;
+  criterion: string;
+  maxMarks: number;
+  awardedMarks: number;
+  evidenceQuote: string;
+  feedback: string;
+}
+
 export interface IncorrectAnswer {
   id: string;
   section: Tier;
@@ -58,6 +67,8 @@ export interface IncorrectAnswer {
   availableMarks: number;
   correctAnswer: string;
   correction: string;
+  feedback?: string;
+  criteria?: MarkingCriterion[];
 }
 
 export interface MarkSchemeItem {
@@ -72,6 +83,9 @@ export interface MarkSchemeItem {
   correctAnswer: string;
   markPoints: string;
   figureRefs: string[];
+  aiGraded?: boolean;
+  feedback?: string;
+  criteria?: MarkingCriterion[];
 }
 
 export interface MarkResult {

@@ -7,7 +7,8 @@
     "dev": "next dev --hostname 0.0.0.0 --port 3000",
     "build": "next build",
     "start": "next start --hostname 0.0.0.0 --port 3000",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:grading": "node scripts/test_openrouter_grading.cjs"
   },
   "dependencies": {
     "jspdf": "4.2.1",

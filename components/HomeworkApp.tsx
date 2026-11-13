@@ -196,12 +196,12 @@ export default function HomeworkApp() {
     setMarkError("");
     setMarking(true);
     try {
-      const response = await fetch("/api/mark", {
+      const response = await fetch("/api/grade", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         cache: "no-store",
         credentials: "same-origin",
-        body: JSON.stringify({ markingPassword, answers, track: exam.track }),
+        body: JSON.stringify({ markingPassword, answers, tier: exam.track }),
       });
       const data = await readApiResponse(response, "Marking could not be completed.");
       setResult(data as unknown as MarkResult);
@@ -327,6 +327,7 @@ export default function HomeworkApp() {
       .sort(([left], [right]) => left - right)
       .map(([paperNumber, questions]) => ({ section, paperNumber, questions }));
   });
+  const aiMarkedItems = result?.markScheme.filter((item) => item.aiGraded) ?? [];
 
   return (
     <main className="exam-page" id="top">
@@ -404,9 +405,9 @@ export default function HomeworkApp() {
                 <p className="eyebrow">GATE 02 <span className="gate-line" /></p>
                 <h2 id="marking-title">Ready for your feedback?</h2>
                 <p>Submit your answers with the separate Marking Password. Only this session's selected track will be marked, and answers/corrections are returned only after the password is accepted.</p>
-                <p className="unofficial-note">Written answers use transparent teacher-authored keyword rules. Ask your teacher to review valid alternative wording that an automatic check may not recognise.</p>
+                <p className="unofficial-note">Written responses are assessed against the teacher’s server-side rubric with OpenRouter’s free-model router; objective choices and exact numerical answers remain deterministic. The question, selected track, teacher-key model answer/rubric and response may be sent to OpenRouter—not your student name as a separate field. Requests may be routed to underlying providers; do not include personal details, and note that model availability and free-tier limits can vary.</p>
               </div>
-              <form className="marking-form" onSubmit={requestMarking}>
+              <form className="marking-form" onSubmit={requestMarking} aria-busy={marking}>
                 <label htmlFor="marking-password">Marking Password</label>
                 <input
                   id="marking-password"
@@ -421,8 +422,9 @@ export default function HomeworkApp() {
                 />
                 {markError && <p className="form-error" role="alert">{markError}</p>}
                 <button className="primary-button" type="submit" disabled={marking}>
-                  {marking ? "Marking your answers…" : "Unlock marking & score"}<span aria-hidden="true">→</span>
+                  {marking ? "AI-marking written responses…" : "Unlock marking & score"}<span aria-hidden="true">→</span>
                 </button>
+                {marking && <p className="ai-marking-status" role="status" aria-live="polite">AI marking is in progress. Your submitted answers remain saved on this device until every grading batch is complete.</p>}
                 <p className="privacy-note">Answers are processed for this request and are not saved to a student account.</p>
               </form>
             </>
@@ -445,12 +447,42 @@ export default function HomeworkApp() {
               </div>
               <p className="grade-disclaimer">Informal Chapter 16 practice indicator only. This is not an official Cambridge grade boundary or a prediction of a final qualification grade.</p>
               <ReportDownload studentName={studentName.trim()} result={result} questions={exam.questions} answers={answers} />
+              {aiMarkedItems.length > 0 && (
+                <section className="ai-feedback-section" aria-label="AI-graded written-response feedback">
+                  <header className="ai-feedback-heading">
+                    <div><p className="eyebrow">WRITTEN RESPONSE · OPENROUTER</p><h3>Rubric points and evidence</h3></div>
+                    <span>{aiMarkedItems.length} response{aiMarkedItems.length === 1 ? "" : "s"}</span>
+                  </header>
+                  <p className="ai-feedback-intro">Points were awarded only when an exact quotation from your submitted answer supported the teacher-key criterion. The total was calculated by the server.</p>
+                  <div className="ai-feedback-list">
+                    {aiMarkedItems.map((item) => (
+                      <article className="ai-feedback-card" key={item.id}>
+                        <div className="correction-meta"><strong>{item.id}</strong><span>{item.paper}</span><span>{item.awardedMarks} / {item.marks} marks</span></div>
+                        <p className="correction-prompt">{item.prompt}</p>
+                        <p className="ai-feedback-summary"><span className="feedback-label">Feedback</span>{item.feedback}</p>
+                        {item.criteria && item.criteria.length > 0 && (
+                          <ol className="ai-criteria-list">
+                            {item.criteria.map((criterion) => (
+                              <li key={criterion.id}>
+                                <span className="ai-criterion-score">{criterion.awardedMarks} / {criterion.maxMarks}</span>
+                                <span>{criterion.criterion}</span>
+                                <span className="ai-criterion-feedback">{criterion.feedback}</span>
+                                {criterion.evidenceQuote && <blockquote>“{criterion.evidenceQuote}”</blockquote>}
+                              </li>
+                            ))}
+                          </ol>
+                        )}
+                      </article>
+                    ))}
+                  </div>
+                </section>
+              )}
               <div className="corrections-heading">
                 <div><p className="eyebrow">FEEDBACK</p><h3>Corrections to review</h3></div>
                 <span>{result.incorrect.length} item{result.incorrect.length === 1 ? "" : "s"}</span>
               </div>
               {result.incorrect.length === 0 ? (
-                <p className="no-errors">All automatically marked responses matched the current practice answer rules. Download the marked script for the complete question-by-question answer breakdown.</p>
+                <p className="no-errors">Every response received full credit under the teacher-provided practice marking criteria. Download the marked script for the complete question-by-question answer breakdown.</p>
               ) : (
                 <div className="correction-list">
                   {result.incorrect.map((item) => (
