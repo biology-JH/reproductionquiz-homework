@@ -405,7 +405,6 @@ export default function HomeworkApp() {
                 <p className="eyebrow">GATE 02 <span className="gate-line" /></p>
                 <h2 id="marking-title">Ready for your feedback?</h2>
                 <p>Submit your answers with the separate Marking Password. Only this session's selected track will be marked, and answers/corrections are returned only after the password is accepted.</p>
-                <p className="unofficial-note">Written responses are assessed against the teacher’s server-side rubric with OpenRouter’s free-model router; objective choices and exact numerical answers remain deterministic. The question, selected track, teacher-key model answer/rubric and response may be sent to OpenRouter—not your student name as a separate field. Requests may be routed to underlying providers; do not include personal details, and note that model availability and free-tier limits can vary.</p>
               </div>
               <form className="marking-form" onSubmit={requestMarking} aria-busy={marking}>
                 <label htmlFor="marking-password">Marking Password</label>
@@ -422,10 +421,8 @@ export default function HomeworkApp() {
                 />
                 {markError && <p className="form-error" role="alert">{markError}</p>}
                 <button className="primary-button" type="submit" disabled={marking}>
-                  {marking ? "AI-marking written responses…" : "Unlock marking & score"}<span aria-hidden="true">→</span>
+                  {marking ? "Marking written responses…" : "Unlock marking & score"}<span aria-hidden="true">→</span>
                 </button>
-                {marking && <p className="ai-marking-status" role="status" aria-live="polite">AI marking is in progress. Your submitted answers remain saved on this device until every grading batch is complete.</p>}
-                <p className="privacy-note">Answers are processed for this request and are not saved to a student account.</p>
               </form>
             </>
           ) : (
@@ -448,12 +445,11 @@ export default function HomeworkApp() {
               <p className="grade-disclaimer">Informal Chapter 16 practice indicator only. This is not an official Cambridge grade boundary or a prediction of a final qualification grade.</p>
               <ReportDownload studentName={studentName.trim()} result={result} questions={exam.questions} answers={answers} />
               {aiMarkedItems.length > 0 && (
-                <section className="ai-feedback-section" aria-label="AI-graded written-response feedback">
+                <section className="ai-feedback-section" aria-label="Written-response rubric feedback">
                   <header className="ai-feedback-heading">
-                    <div><p className="eyebrow">WRITTEN RESPONSE · OPENROUTER</p><h3>Rubric points and evidence</h3></div>
+                    <div><p className="eyebrow">WRITTEN RESPONSE · RUBRIC</p><h3>Rubric points and evidence</h3></div>
                     <span>{aiMarkedItems.length} response{aiMarkedItems.length === 1 ? "" : "s"}</span>
                   </header>
-                  <p className="ai-feedback-intro">Points were awarded only when an exact quotation from your submitted answer supported the teacher-key criterion. The total was calculated by the server.</p>
                   <div className="ai-feedback-list">
                     {aiMarkedItems.map((item) => (
                       <article className="ai-feedback-card" key={item.id}>
@@ -496,7 +492,6 @@ export default function HomeworkApp() {
                   ))}
                 </div>
               )}
-              <p className="unofficial-note final-note">These explanations are teacher-created, unofficial practice feedback. They are not copied from or endorsed as official Cambridge mark-scheme text.</p>
             </section>
           )}
         </section>

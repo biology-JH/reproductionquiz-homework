@@ -122,8 +122,8 @@ export default function ReportDownload({ studentName, result, questions, answers
         write(`Accepted answer / correct response: ${marked.correctAnswer}`, { gap: 2 });
         write(`Mark-scheme points / correction: ${marked.markPoints}`, { gap: 3 });
         if (marked.aiGraded) {
-          write("AI written-response rubric breakdown (unofficial practice feedback)", { bold: true, color: [33, 78, 52], gap: 2 });
-          write(`AI feedback: ${marked.feedback || "See the individual criterion results below."}`, { gap: 2 });
+          write("Written-response rubric breakdown", { bold: true, color: [33, 78, 52], gap: 2 });
+          write(`Feedback: ${marked.feedback || "See the individual criterion results below."}`, { gap: 2 });
           for (const criterion of marked.criteria ?? []) {
             write(`Criterion ${criterion.id}: ${criterion.awardedMarks}/${criterion.maxMarks} · ${criterion.criterion}`, { bold: true, gap: 2 });
             write(`Rationale: ${criterion.feedback}`, { gap: 2 });

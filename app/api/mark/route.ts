@@ -112,7 +112,7 @@ function markQuestion(question: MasterQuestion, responseValue: unknown): { score
     if (!groups.length) return { score: 0, note: "No automatic marking rule was available." };
     const hits = groups.filter((group) => containsAlias(response, Array.isArray(group) ? group : [group])).length;
     const score = groups.length > maximum ? Math.floor((hits * maximum) / groups.length) : Math.min(maximum, hits);
-    return { score, note: "Written response requires the protected AI grading path." };
+    return { score, note: "Written response needs review." };
   }
 
   return { score: 0, note: "This response needs teacher review." };
@@ -192,20 +192,20 @@ async function gradeConstructedResponses(pending: PendingAiGrade[]): Promise<Map
   const output = new Map<string, AiGradeResult>();
   if (!pending.length) return output;
   const apiKey = process.env.OPENROUTER_API_KEY?.trim();
-  if (!apiKey) throw new OpenRouterGradeError("OpenRouter grading is not configured. Ask your teacher to check the server settings.");
+  if (!apiKey) throw new OpenRouterGradeError("Marking is not available right now. Ask your teacher to check the site's settings.");
 
   const batches = makeAiBatches(pending);
   const settled = await Promise.allSettled(batches.map((batch) => gradeOpenRouterBatch(batch, apiKey)));
   const failure = settled.find((item): item is PromiseRejectedResult => item.status === "rejected");
   if (failure) {
     if (failure.reason instanceof OpenRouterGradeError) throw failure.reason;
-    throw new OpenRouterGradeError("AI marking could not be completed. Your saved answers are unchanged; please retry shortly.");
+    throw new OpenRouterGradeError("Marking could not be completed. Your saved answers are unchanged; please try again shortly.");
   }
   for (const item of settled) {
     if (item.status !== "fulfilled") continue;
     for (const grade of item.value) output.set(grade.questionId, grade);
   }
-  if (output.size !== pending.length) throw new OpenRouterGradeError("AI marking returned an incomplete answer set. No partial score was released; please retry.");
+  if (output.size !== pending.length) throw new OpenRouterGradeError("Marking could not be completed. No partial score was released; please try again.");
   return output;
 }
 
@@ -285,11 +285,8 @@ export async function POST(request: NextRequest) {
           paper: publicQuestion.paper,
         }], process.env.OPENROUTER_API_KEY?.trim() ?? "");
         return privateJson({ score: `${grade.score}/${grade.maxMarks}`, isCorrect: grade.isCorrect, feedback: grade.feedback });
-      } catch (error) {
-        const message = error instanceof OpenRouterGradeError
-          ? error.message
-          : "AI marking could not be completed. Your answers are unchanged; please retry shortly.";
-        return privateJson({ ok: false, message }, 503);
+      } catch {
+        return privateJson({ ok: false, message: "Marking could not be completed. Your answers are unchanged; please try again shortly." }, 503);
       }
     }
 
@@ -331,11 +328,8 @@ export async function POST(request: NextRequest) {
   let aiGrades: Map<string, AiGradeResult>;
   try {
     aiGrades = await gradeConstructedResponses(pending);
-  } catch (error) {
-    const message = error instanceof OpenRouterGradeError
-      ? error.message
-      : "AI marking could not be completed. Your saved answers are unchanged; please retry shortly.";
-    return privateJson({ ok: false, message }, 503);
+  } catch {
+    return privateJson({ ok: false, message: "Marking could not be completed. Your saved answers are unchanged; please try again shortly." }, 503);
   }
 
   let score = 0;
