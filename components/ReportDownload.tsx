@@ -62,7 +62,7 @@ export default function ReportDownload({ studentName, result, questions, answers
         const { bold = false, gap = 3, color = [33, 42, 34] } = options;
         pdf.setTextColor(...color);
         pdf.setFont("times", bold ? "bold" : "normal");
-        pdf.setFontSize(24);
+        pdf.setFontSize(12);
         const safeText = text.trim() || "—";
         const lines = pdf.splitTextToSize(safeText, contentWidth) as string[];
         for (const line of lines) {
