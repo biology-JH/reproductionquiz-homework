@@ -47,7 +47,7 @@ export default function ReportDownload({ studentName, result, questions, answers
       const left = 17;
       const right = 193;
       const contentWidth = right - left;
-      const lineHeight = 12.5;
+      const lineHeight = 6;
       const pageBottom = 279;
       let y = 20;
       const embeddedFigures = new Set<string>();
@@ -59,7 +59,7 @@ export default function ReportDownload({ studentName, result, questions, answers
       }
 
       function write(text: string, options: { bold?: boolean; gap?: number; color?: [number, number, number] } = {}) {
-        const { bold = false, gap = 3, color = [33, 42, 34] } = options;
+        const { bold = false, gap = 2, color = [33, 42, 34] } = options;
         pdf.setTextColor(...color);
         pdf.setFont("times", bold ? "bold" : "normal");
         pdf.setFontSize(12);
@@ -79,13 +79,13 @@ export default function ReportDownload({ studentName, result, questions, answers
         write(figure.caption, { bold: true, gap: 2, color: [33, 78, 52] });
         const image = await imageAsPngDataUrl(figure.src);
         const maxWidth = contentWidth;
-        const maxHeight = 100;
+        const maxHeight = 70;
         const scale = Math.min(maxWidth / image.width, maxHeight / image.height);
         const width = image.width * scale;
         const height = image.height * scale;
         if (y + height > pageBottom) newPage();
         pdf.addImage(image.dataUrl, "PNG", left, y, width, height, undefined, "FAST");
-        y += height + 8;
+        y += height + 4;
       }
 
       pdf.setProperties({
@@ -93,8 +93,8 @@ export default function ReportDownload({ studentName, result, questions, answers
         subject: "Unofficial teacher-created practice report",
         author: "Reproduction Mastery",
       });
-      write("REPRODUCTION MASTERY · IGCSE BIOLOGY 0610", { bold: true, color: [33, 78, 52], gap: 4 });
-      write("Chapter 16 marked script", { bold: true, gap: 4 });
+      write("REPRODUCTION MASTERY · IGCSE BIOLOGY 0610", { bold: true, color: [33, 78, 52], gap: 3 });
+      write("Chapter 16 marked script", { bold: true, gap: 3 });
       write(`Student: ${studentName || "Student"}`, { bold: true });
       write(`Completed: ${new Date(result.completedAt).toLocaleDateString("en-GB", { day: "2-digit", month: "long", year: "numeric" })}`);
       write(`Track: ${result.track} · Questions: ${questions.length}`);
@@ -105,7 +105,7 @@ export default function ReportDownload({ studentName, result, questions, answers
         write(`${paper.paperLabel}: ${paper.score} / ${paper.maxMarks}`);
       }
       write(`Informal practice estimate: ${result.gradeEstimate}. This is not an official Cambridge grade boundary or grade prediction.`);
-      write("Unofficial practice mark scheme: questions, accepted answers and marking guidance are teacher-created from the supplied Chapter 16 lesson material. They are not official Cambridge International mark-scheme text.", { gap: 7 });
+      write("Unofficial practice mark scheme: questions, accepted answers and marking guidance are teacher-created from the supplied Chapter 16 lesson material. They are not official Cambridge International mark-scheme text.", { gap: 4 });
 
       for (const question of questions) {
         const marked = markById.get(question.id);
@@ -113,21 +113,21 @@ export default function ReportDownload({ studentName, result, questions, answers
         if (y + lineHeight * 3 > pageBottom) newPage();
         pdf.setDrawColor(214, 168, 75);
         pdf.line(left, y, right, y);
-        y += 6;
+        y += 4;
         write(`${question.id} · ${question.paper} · ${question.section} objective · ${marked.awardedMarks}/${marked.marks} marks`, { bold: true, color: [33, 78, 52], gap: 2 });
         write(`Question: ${question.prompt}`, { gap: 2 });
         if (marked.figureRefs.length) write(`Figure reference${marked.figureRefs.length === 1 ? "" : "s"}: ${marked.figureRefs.join(", ")}`, { gap: 2 });
         for (const figure of question.figuresToDisplay ?? []) await embedFigure(figure);
         write(`Student answer: ${answers[question.id]?.trim() || "No response"}`, { gap: 2 });
         write(`Accepted answer / correct response: ${marked.correctAnswer}`, { gap: 2 });
-        write(`Mark-scheme points / correction: ${marked.markPoints}`, { gap: 5 });
+        write(`Mark-scheme points / correction: ${marked.markPoints}`, { gap: 3 });
         if (marked.aiGraded) {
           write("AI written-response rubric breakdown (unofficial practice feedback)", { bold: true, color: [33, 78, 52], gap: 2 });
-          write(`AI feedback: ${marked.feedback || "See the individual criterion results below."}`, { gap: 3 });
+          write(`AI feedback: ${marked.feedback || "See the individual criterion results below."}`, { gap: 2 });
           for (const criterion of marked.criteria ?? []) {
             write(`Criterion ${criterion.id}: ${criterion.awardedMarks}/${criterion.maxMarks} · ${criterion.criterion}`, { bold: true, gap: 2 });
             write(`Rationale: ${criterion.feedback}`, { gap: 2 });
-            if (criterion.evidenceQuote) write(`Exact evidence quoted from the student's answer: “${criterion.evidenceQuote}”`, { gap: 3 });
+            if (criterion.evidenceQuote) write(`Exact evidence quoted from the student's answer: “${criterion.evidenceQuote}”`, { gap: 2 });
           }
         }
       }
