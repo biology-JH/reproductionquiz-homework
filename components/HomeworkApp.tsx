@@ -327,7 +327,8 @@ export default function HomeworkApp() {
       .sort(([left], [right]) => left - right)
       .map(([paperNumber, questions]) => ({ section, paperNumber, questions }));
   });
-  const aiMarkedItems = result?.markScheme.filter((item) => item.aiGraded) ?? [];
+  const constructedItems = result?.markScheme.filter((item) => item.gradingMode) ?? [];
+  const hasPendingReview = constructedItems.some((item) => item.gradingMode === "pending");
 
   return (
     <main className="exam-page" id="top">
@@ -429,7 +430,7 @@ export default function HomeworkApp() {
             <section className="results-panel" id="results-panel" aria-live="polite">
               <div className="result-heading">
                 <div>
-                  <p className="eyebrow">MARKING COMPLETE · {result.track.toUpperCase()} TRACK</p>
+                  <p className="eyebrow">{hasPendingReview ? "RESULT READY · SOME ITEMS PENDING REVIEW" : "MARKING COMPLETE"} · {result.track.toUpperCase()} TRACK</p>
                   <h2 id="marking-title">Your result, {studentName.trim()}.</h2>
                 </div>
                 <div className="score-stamp"><strong>{result.score}<small> / {result.maxMarks}</small></strong><span>{result.percent.toFixed(1)}%</span></div>
@@ -444,18 +445,18 @@ export default function HomeworkApp() {
               </div>
               <p className="grade-disclaimer">Informal Chapter 16 practice indicator only. This is not an official Cambridge grade boundary or a prediction of a final qualification grade.</p>
               <ReportDownload studentName={studentName.trim()} result={result} questions={exam.questions} answers={answers} />
-              {aiMarkedItems.length > 0 && (
+              {constructedItems.length > 0 && (
                 <section className="ai-feedback-section" aria-label="Written-response rubric feedback">
                   <header className="ai-feedback-heading">
                     <div><p className="eyebrow">WRITTEN RESPONSE · RUBRIC</p><h3>Rubric points and evidence</h3></div>
-                    <span>{aiMarkedItems.length} response{aiMarkedItems.length === 1 ? "" : "s"}</span>
+                    <span>{constructedItems.length} response{constructedItems.length === 1 ? "" : "s"}</span>
                   </header>
                   <div className="ai-feedback-list">
-                    {aiMarkedItems.map((item) => (
+                    {constructedItems.map((item) => (
                       <article className="ai-feedback-card" key={item.id}>
                         <div className="correction-meta"><strong>{item.id}</strong><span>{item.paper}</span><span>{item.awardedMarks} / {item.marks} marks</span></div>
                         <p className="correction-prompt">{item.prompt}</p>
-                        <p className="ai-feedback-summary"><span className="feedback-label">Feedback</span>{item.feedback}</p>
+                        <p className="ai-feedback-summary"><span className="feedback-label">{item.gradingMode === "pending" ? "Review status" : item.gradingMode === "keyword" ? "Automated check" : "Feedback"}</span>{item.feedback || "Pending manual review (AI service busy). The accepted answer and rubric are included below."}</p>
                         {item.criteria && item.criteria.length > 0 && (
                           <ol className="ai-criteria-list">
                             {item.criteria.map((criterion) => (

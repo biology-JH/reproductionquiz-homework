@@ -121,9 +121,19 @@ export default function ReportDownload({ studentName, result, questions, answers
         write(`Student answer: ${answers[question.id]?.trim() || "No response"}`, { gap: 2 });
         write(`Accepted answer / correct response: ${marked.correctAnswer}`, { gap: 2 });
         write(`Mark-scheme points / correction: ${marked.markPoints}`, { gap: 3 });
-        if (marked.aiGraded) {
+        if (marked.gradingMode === "keyword") {
+          const deterministicMode = marked.feedback?.includes("(deterministic mode)") ?? false;
+          write(deterministicMode
+            ? "Graded via automated keyword check (deterministic mode)."
+            : "Graded via automated keyword check (AI unavailable).", { bold: true, color: [33, 78, 52], gap: 2 });
+          write(`Feedback: ${marked.feedback || "See the matched and missed rubric points below."}`, { gap: 2 });
+        } else if (marked.gradingMode === "pending") {
+          write("Pending manual review (AI service busy). The accepted answer and rubric are included above.", { bold: true, color: [33, 78, 52], gap: 2 });
+        } else if (marked.gradingMode === "model" || marked.aiGraded) {
           write("Written-response rubric breakdown", { bold: true, color: [33, 78, 52], gap: 2 });
           write(`Feedback: ${marked.feedback || "See the individual criterion results below."}`, { gap: 2 });
+        }
+        if (marked.criteria?.length) {
           for (const criterion of marked.criteria ?? []) {
             write(`Criterion ${criterion.id}: ${criterion.awardedMarks}/${criterion.maxMarks} · ${criterion.criterion}`, { bold: true, gap: 2 });
             write(`Rationale: ${criterion.feedback}`, { gap: 2 });

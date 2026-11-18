@@ -53,7 +53,10 @@ interface CriterionSpec {
 }
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
-const REQUEST_TIMEOUT_MS = 240_000;
+const REQUEST_TIMEOUT_MS = 25_000;
+const MAX_RETRIES = 2;
+const DEFAULT_MODEL = "google/gemini-2.5-flash";
+const FREE_FALLBACK_MODELS = ["google/gemini-2.0-flash-exp:free", "openrouter/free"] as const;
 const MAX_ANSWER_LENGTH = 8_000;
 
 function acceptedValues(question: MasterQuestionRule): string[] {
@@ -246,11 +249,29 @@ function buildFeedback(score: number, maxMarks: number, criteria: CriterionResul
 }
 
 export async function gradeOpenRouterBatch(inputs: AiGradeInput[], apiKey: string): Promise<AiGradeResult[]> {
+  inputs = inputs.filter((input) => input.studentAnswer.trim().length > 0);
   if (!inputs.length) return [];
   if (!apiKey.trim()) throw new OpenRouterGradeError("OpenRouter grading is not configured. Ask your teacher to check the server settings.");
   if (inputs.some((input) => input.studentAnswer.length > MAX_ANSWER_LENGTH)) {
     throw new OpenRouterGradeError("A written response is too long to grade. Shorten it and submit again.");
   }
+  const primaryModel = process.env.OPENROUTER_MODEL?.trim() || DEFAULT_MODEL;
+  const models = [...new Set([primaryModel, ...FREE_FALLBACK_MODELS])];
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt += 1) {
+    const model = models[Math.min(attempt, models.length - 1)];
+    try {
+      return await gradeOpenRouterBatchOnce(inputs, apiKey, model);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  if (lastError instanceof OpenRouterGradeError) throw lastError;
+  throw new OpenRouterGradeError("OpenRouter could not grade this answer batch.");
+}
+
+async function gradeOpenRouterBatchOnce(inputs: AiGradeInput[], apiKey: string, model: string): Promise<AiGradeResult[]> {
+  if (!inputs.length) return [];
 
   const expected = new Map(inputs.map((input) => [input.question.id, input]));
   if (expected.size !== inputs.length) throw new OpenRouterGradeError("The grading batch contains duplicate question IDs.");
@@ -292,7 +313,7 @@ export async function gradeOpenRouterBatch(inputs: AiGradeInput[], apiKey: strin
       cache: "no-store",
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       body: JSON.stringify({
-        model: "openrouter/free",
+        model,
         messages: [
           { role: "system", content: system },
           { role: "user", content: JSON.stringify({ gradingTasks }) },

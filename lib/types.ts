@@ -83,6 +83,7 @@ export interface MarkSchemeItem {
   correctAnswer: string;
   markPoints: string;
   figureRefs: string[];
+  gradingMode?: "model" | "keyword" | "pending";
   aiGraded?: boolean;
   feedback?: string;
   criteria?: MarkingCriterion[];

@@ -6,9 +6,9 @@ import { TRACK_COOKIE_NAME, verifyTrackSessionToken } from "@/lib/track-session"
 import type { MarkSchemeItem, PaperScore, Tier } from "@/lib/types";
 import { encryptedMasterKey } from "@/server/master_key";
 import { buildTrackExam } from "@/server/track-content";
+import { gradeDeterministically } from "@/server/deterministic-grading";
 import {
   gradeOpenRouterBatch,
-  OpenRouterGradeError,
   type AiGradeInput,
   type AiGradeResult,
   type MasterQuestionRule,
@@ -16,10 +16,11 @@ import {
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 300;
+export const maxDuration = 90;
 
 type MasterQuestion = MasterQuestionRule;
 type PendingAiGrade = { paperNumber: number; input: AiGradeInput };
+type ConstructedGrade = { grade: AiGradeResult; source: "model" | "keyword" | "pending" };
 
 type GradePayload = {
   markingPassword?: unknown;
@@ -160,9 +161,15 @@ function taskCharacters(input: AiGradeInput): number {
     + acceptedValues(input.question).join(";").length;
 }
 
-function makeAiBatches(pending: PendingAiGrade[]): AiGradeInput[][] {
+function makeAiBatches(pending: PendingAiGrade[]): { batches: AiGradeInput[][]; oversized: PendingAiGrade[] } {
   const byPaper = new Map<number, PendingAiGrade[]>();
+  const oversized: PendingAiGrade[] = [];
   for (const item of pending) {
+    if (!item.input.studentAnswer.trim()) continue;
+    if (taskCharacters(item.input) > 24_000) {
+      oversized.push(item);
+      continue;
+    }
     const paperItems = byPaper.get(item.paperNumber) ?? [];
     paperItems.push(item);
     byPaper.set(item.paperNumber, paperItems);
@@ -174,7 +181,6 @@ function makeAiBatches(pending: PendingAiGrade[]): AiGradeInput[][] {
     let chars = 0;
     for (const item of paperItems) {
       const size = taskCharacters(item.input);
-      if (size > 24_000) throw new OpenRouterGradeError("A written response or rubric is too large to grade. Shorten the response and try again.");
       if (current.length >= 18 || (current.length > 0 && chars + size > 24_000)) {
         batches.push(current);
         current = [];
@@ -185,27 +191,64 @@ function makeAiBatches(pending: PendingAiGrade[]): AiGradeInput[][] {
     }
     if (current.length) batches.push(current);
   }
-  return batches;
+  return { batches, oversized };
 }
 
-async function gradeConstructedResponses(pending: PendingAiGrade[]): Promise<Map<string, AiGradeResult>> {
-  const output = new Map<string, AiGradeResult>();
-  if (!pending.length) return output;
-  const apiKey = process.env.OPENROUTER_API_KEY?.trim();
-  if (!apiKey) throw new OpenRouterGradeError("Marking is not available right now. Ask your teacher to check the site's settings.");
+function safeKeywordGrade(input: AiGradeInput, reason: "AI unavailable" | "deterministic mode"): ConstructedGrade {
+  try {
+    return { grade: gradeDeterministically(input, reason), source: "keyword" };
+  } catch {
+    return {
+      source: "pending",
+      grade: {
+        questionId: input.question.id,
+        score: 0,
+        maxMarks: input.question.marks,
+        isCorrect: false,
+        feedback: "Pending manual review (AI service busy). The accepted answer and rubric are included below.",
+        criteria: [],
+      },
+    };
+  }
+}
 
-  const batches = makeAiBatches(pending);
-  const settled = await Promise.allSettled(batches.map((batch) => gradeOpenRouterBatch(batch, apiKey)));
-  const failure = settled.find((item): item is PromiseRejectedResult => item.status === "rejected");
-  if (failure) {
-    if (failure.reason instanceof OpenRouterGradeError) throw failure.reason;
-    throw new OpenRouterGradeError("Marking could not be completed. Your saved answers are unchanged; please try again shortly.");
+async function gradeConstructedResponses(pending: PendingAiGrade[]): Promise<Map<string, ConstructedGrade>> {
+  const output = new Map<string, ConstructedGrade>();
+  const answered = pending.filter((item) => item.input.studentAnswer.trim());
+  if (!answered.length) return output;
+
+  const deterministicMode = process.env.GRADING_MODE?.trim().toLowerCase() === "deterministic";
+  if (deterministicMode) {
+    for (const item of answered) output.set(item.input.question.id, safeKeywordGrade(item.input, "deterministic mode"));
+    return output;
   }
-  for (const item of settled) {
-    if (item.status !== "fulfilled") continue;
-    for (const grade of item.value) output.set(grade.questionId, grade);
+
+  const apiKey = process.env.OPENROUTER_API_KEY?.trim();
+  if (!apiKey) {
+    for (const item of answered) output.set(item.input.question.id, safeKeywordGrade(item.input, "AI unavailable"));
+    return output;
   }
-  if (output.size !== pending.length) throw new OpenRouterGradeError("Marking could not be completed. No partial score was released; please try again.");
+
+  const { batches, oversized } = makeAiBatches(answered);
+  for (const item of oversized) output.set(item.input.question.id, safeKeywordGrade(item.input, "AI unavailable"));
+
+  const outcomes = await Promise.all(batches.map(async (batch): Promise<ConstructedGrade[]> => {
+    try {
+      const grades = await gradeOpenRouterBatch(batch, apiKey);
+      return grades.map((grade) => ({ grade, source: "model" }));
+    } catch {
+      return batch.map((input) => safeKeywordGrade(input, "AI unavailable"));
+    }
+  }));
+  for (const outcome of outcomes) {
+    for (const item of outcome) output.set(item.grade.questionId, item);
+  }
+
+  for (const item of answered) {
+    if (!output.has(item.input.question.id)) {
+      output.set(item.input.question.id, safeKeywordGrade(item.input, "AI unavailable"));
+    }
+  }
   return output;
 }
 
@@ -277,17 +320,16 @@ export async function POST(request: NextRequest) {
     if (!answer.trim()) return privateJson({ score: `0/${masterQuestion.marks}`, isCorrect: false, feedback: "No response submitted." });
 
     if (masterQuestion.type === "contains") {
-      try {
-        const [grade] = await gradeOpenRouterBatch([{
-          question: { ...masterQuestion, prompt: publicQuestion.prompt, section: publicQuestion.section },
-          studentAnswer: answer,
-          track: sessionTrack,
-          paper: publicQuestion.paper,
-        }], process.env.OPENROUTER_API_KEY?.trim() ?? "");
-        return privateJson({ score: `${grade.score}/${grade.maxMarks}`, isCorrect: grade.isCorrect, feedback: grade.feedback });
-      } catch {
-        return privateJson({ ok: false, message: "Marking could not be completed. Your answers are unchanged; please try again shortly." }, 503);
-      }
+      const input: AiGradeInput = {
+        question: { ...masterQuestion, prompt: publicQuestion.prompt, section: publicQuestion.section },
+        studentAnswer: answer,
+        track: sessionTrack,
+        paper: publicQuestion.paper,
+      };
+      const grades = await gradeConstructedResponses([{ paperNumber: publicQuestion.paperNumber ?? 0, input }]);
+      const [graded] = [...grades.values()];
+      const grade = graded?.grade ?? gradeDeterministically(input, "AI unavailable");
+      return privateJson({ score: `${grade.score}/${grade.maxMarks}`, isCorrect: grade.isCorrect, feedback: grade.feedback });
     }
 
     const result = markQuestion(masterQuestion, answer);
@@ -325,12 +367,7 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  let aiGrades: Map<string, AiGradeResult>;
-  try {
-    aiGrades = await gradeConstructedResponses(pending);
-  } catch {
-    return privateJson({ ok: false, message: "Marking could not be completed. Your saved answers are unchanged; please try again shortly." }, 503);
-  }
+  const aiGrades = await gradeConstructedResponses(pending);
 
   let score = 0;
   let coreScore = 0;
@@ -358,14 +395,15 @@ export async function POST(request: NextRequest) {
     const publicQuestion = exam.questions[index];
     const question = masterQuestions[index] as MasterQuestion;
     const response = typeof responses[question.id] === "string" ? String(responses[question.id]) : "";
-    const aiGrade = aiGrades.get(question.id);
+    const constructedGrade = aiGrades.get(question.id);
+    const aiGrade = constructedGrade?.grade;
     const result = aiGrade
       ? { score: aiGrade.score, note: aiGrade.feedback }
       : markQuestion(question, response);
     const correctAnswer = canonicalAnswer(question);
     const points = markingPoints(question);
-    const correction = aiGrade
-      ? `${aiGrade.feedback}\n\nReview the accepted response and criterion-level evidence below.`
+    const correction = constructedGrade
+      ? `${constructedGrade.grade.feedback}\n\nReview the accepted response and criterion-level evidence below.`
       : question.rubric?.trim() || `A full-credit response should include: ${points}`;
     score += result.score;
 
@@ -401,7 +439,8 @@ export async function POST(request: NextRequest) {
       correctAnswer,
       markPoints: points,
       figureRefs: publicQuestion.figureRefs ?? [],
-      aiGraded: Boolean(aiGrade),
+      gradingMode: constructedGrade?.source,
+      aiGraded: constructedGrade?.source === "model",
       feedback: aiGrade?.feedback,
       criteria: aiGrade?.criteria,
     });
